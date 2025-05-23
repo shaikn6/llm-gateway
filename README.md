@@ -38,3 +38,19 @@ curl http://localhost:8000/v1/chat/completions \
 
 ## License
 MIT
+
+## API Reference
+
+[![OpenAPI](https://img.shields.io/badge/OpenAPI-3.0-6BA539?logo=openapi-initiative&logoColor=white)](http://localhost:8000/docs)
+[![Swagger UI](https://img.shields.io/badge/Swagger_UI-docs-85EA2D?logo=swagger&logoColor=black)](http://localhost:8000/docs)
+[![ReDoc](https://img.shields.io/badge/ReDoc-redoc-8A2BE2)](http://localhost:8000/redoc)
+
+Interactive docs: `http://localhost:8000/docs` (Swagger UI) · `http://localhost:8000/redoc` (ReDoc)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/health` | Health check — returns service version |
+| `POST` | `/v1/chat/completions` | OpenAI-compatible chat completions (routes to Anthropic or OpenAI) |
+| `GET` | `/v1/experiments` | List all A/B experiments |
+| `POST` | `/v1/experiments` | Create a new A/B experiment |
+| `GET` | `/v1/experiments/{experiment_id}/assignment` | Get model assignment for a user |
