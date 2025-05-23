@@ -1,0 +1,20 @@
+apiVersion: v2
+name: llm-gateway
+description: Production LLM gateway with semantic caching, intelligent routing, and cost analytics
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - llm
+  - gateway
+  - ai
+  - openai-compatible
+  - redis
+maintainers:
+  - name: Nagizaaz Shaik
+    email: shaik.izaaz009@gmail.com
+dependencies:
+  - name: redis
+    version: "19.x.x"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: redis.enabled
