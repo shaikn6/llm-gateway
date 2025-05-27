@@ -1,0 +1,159 @@
+# Default values for llm-gateway
+replicaCount: 2
+
+image:
+  repository: ghcr.io/shaikn6/llm-gateway
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8000"
+  prometheus.io/path: "/metrics"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8000
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+    nginx.ingress.kubernetes.io/rate-limit-connections: "20"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: llm-gateway.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: llm-gateway-tls
+      hosts:
+        - llm-gateway.example.com
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+  customMetrics:
+    enabled: true
+    rpsThreshold: 100
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8000
+  initialDelaySeconds: 30
+  periodSeconds: 15
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 8000
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+# Redis sidecar for semantic caching
+redis:
+  enabled: true
+  image:
+    repository: redis
+    tag: "7.2-alpine"
+  port: 6379
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  persistence:
+    enabled: true
+    storageClass: ""
+    size: 5Gi
+  config:
+    maxmemory: "400mb"
+    maxmemoryPolicy: "allkeys-lru"
+    saveEnabled: false
+
+# Environment configuration
+env:
+  LOG_LEVEL: "INFO"
+  WORKERS: "4"
+  REDIS_HOST: "localhost"
+  REDIS_PORT: "6379"
+  CACHE_TTL_SECONDS: "3600"
+  MAX_TOKENS_DEFAULT: "4096"
+  RATE_LIMIT_REQUESTS_PER_MINUTE: "100"
+
+# External secrets (ESO)
+externalSecrets:
+  enabled: true
+  refreshInterval: "1h"
+  secretStoreRef:
+    name: aws-secrets-manager
+    kind: ClusterSecretStore
+  remoteRefs:
+    openaiApiKey: "llm-gateway/openai-api-key"
+    anthropicApiKey: "llm-gateway/anthropic-api-key"
+    ollamaHost: "llm-gateway/ollama-host"
+
+# Network policy
+networkPolicy:
+  enabled: true
+
+nodeSelector: {}
+tolerations: []
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - llm-gateway
+          topologyKey: kubernetes.io/hostname
