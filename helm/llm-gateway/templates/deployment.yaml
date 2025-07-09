@@ -1,0 +1,146 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "llm-gateway.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "llm-gateway.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "llm-gateway.selectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "llm-gateway.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "llm-gateway.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          env:
+            - name: REDIS_HOST
+              value: {{ .Values.env.REDIS_HOST | quote }}
+            - name: REDIS_PORT
+              value: {{ .Values.env.REDIS_PORT | quote }}
+            - name: CACHE_TTL_SECONDS
+              value: {{ .Values.env.CACHE_TTL_SECONDS | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.env.LOG_LEVEL | quote }}
+            - name: WORKERS
+              value: {{ .Values.env.WORKERS | quote }}
+            - name: MAX_TOKENS_DEFAULT
+              value: {{ .Values.env.MAX_TOKENS_DEFAULT | quote }}
+            - name: RATE_LIMIT_REQUESTS_PER_MINUTE
+              value: {{ .Values.env.RATE_LIMIT_REQUESTS_PER_MINUTE | quote }}
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "llm-gateway.fullname" . }}-secrets
+                  key: openai-api-key
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "llm-gateway.fullname" . }}-secrets
+                  key: anthropic-api-key
+            - name: OLLAMA_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "llm-gateway.fullname" . }}-secrets
+                  key: ollama-host
+                  optional: true
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+        {{- if .Values.redis.enabled }}
+        - name: redis
+          image: "{{ .Values.redis.image.repository }}:{{ .Values.redis.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: redis
+              containerPort: {{ .Values.redis.port }}
+              protocol: TCP
+          command:
+            - redis-server
+            - --maxmemory
+            - {{ .Values.redis.config.maxmemory | quote }}
+            - --maxmemory-policy
+            - {{ .Values.redis.config.maxmemoryPolicy | quote }}
+            {{- if not .Values.redis.config.saveEnabled }}
+            - --save
+            - ""
+            {{- end }}
+          livenessProbe:
+            tcpSocket:
+              port: {{ .Values.redis.port }}
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.redis.resources | nindent 12 }}
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+        {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if .Values.redis.enabled }}
+        - name: redis-data
+          {{- if .Values.redis.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "llm-gateway.fullname" . }}-redis
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
