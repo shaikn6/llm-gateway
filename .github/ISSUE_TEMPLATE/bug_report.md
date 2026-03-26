@@ -1,24 +1,29 @@
 ---
-name: Bug report
-about: Create a report to help us improve
-title: '[BUG] '
+name: Bug Report
+about: Report a bug or unexpected behavior
 labels: bug
-assignees: ''
 ---
 
-**Describe the bug**
-A clear and concise description of what the bug is.
+## Description
+A clear description of the bug.
 
-**To Reproduce**
-Steps to reproduce the behavior.
+## Steps to Reproduce
+1. 
+2. 
+3. 
 
-**Expected behavior**
-What you expected to happen.
+## Expected Behavior
 
-**Environment**
+
+## Actual Behavior
+
+
+## Environment
 - Python version:
 - OS:
 - Package version:
 
-**Additional context**
-Add any other context about the problem here.
+## Logs / Stack Trace
+```python
+# paste here
+```
