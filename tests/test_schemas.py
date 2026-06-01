@@ -1,357 +1,429 @@
-"""
-Unit tests for Pydantic schemas in src/models/schemas.py.
-
-Tests cover validation, cross-field validators, and serialization.
-"""
+"""Unit tests for src/models/schemas.py."""
 
 from __future__ import annotations
+
+import time
 
 import pytest
 from pydantic import ValidationError
 
 from src.models.schemas import (
-    AcknowledgeRequest,
-    AlertSchema,
-    BatchDetectRequest,
-    BatchDetectResponse,
-    BoundingBoxSchema,
-    ComponentHealth,
-    DetectRequest,
-    DetectResponse,
-    DetectionSchema,
-    FWIComponentsSchema,
-    HealthResponse,
-    IncidentSchema,
-    IncidentUpdateSchema,
-    RiskZoneRequest,
-    RiskZoneResponse,
-    SpreadHorizonSchema,
-    StreamFrame,
-    StreamSubscribeMessage,
-    TransitionRequest,
+    CacheResult,
+    ChatCompletionChunk,
+    ChatCompletionRequest,
+    ChatCompletionResponse,
+    ChatMessage,
+    Choice,
+    ChoiceDelta,
+    ChoiceMessage,
+    CostRecord,
+    ErrorResponse,
+    GatewayStats,
+    HealthStatus,
+    MessageRole,
+    ModelObject,
+    ModelsListResponse,
+    ProviderName,
+    RateLimitInfo,
+    ResponseFormat,
+    RoutingDecision,
+    StreamChoice,
+    StreamOptions,
+    UsageInfo,
 )
-import time
 
 
-# ---------------------------------------------------------------------------
-# BoundingBoxSchema
-# ---------------------------------------------------------------------------
+class TestMessageRole:
+    def test_all_roles_exist(self):
+        roles = {r.value for r in MessageRole}
+        assert roles == {"system", "user", "assistant", "tool", "function"}
+
+    def test_user_role(self):
+        assert MessageRole.user == "user"
 
 
-class TestBoundingBoxSchema:
-    def test_valid_bbox(self):
-        b = BoundingBoxSchema(x1=0.1, y1=0.2, x2=0.5, y2=0.8)
-        assert b.x1 == 0.1
+class TestChatMessage:
+    def test_valid_user_message(self):
+        msg = ChatMessage(role=MessageRole.user, content="Hello")
+        assert msg.role == MessageRole.user
+        assert msg.content == "Hello"
 
-    def test_x2_must_be_greater_than_x1(self):
-        with pytest.raises(ValidationError, match="x2 must be greater than x1"):
-            BoundingBoxSchema(x1=0.5, y1=0.2, x2=0.3, y2=0.8)
+    def test_optional_fields_default_none(self):
+        msg = ChatMessage(role=MessageRole.user, content="Hi")
+        assert msg.name is None
+        assert msg.tool_call_id is None
+        assert msg.tool_calls is None
 
-    def test_y2_must_be_greater_than_y1(self):
-        with pytest.raises(ValidationError, match="y2 must be greater than y1"):
-            BoundingBoxSchema(x1=0.1, y1=0.8, x2=0.5, y2=0.2)
+    def test_assistant_with_tool_calls(self):
+        tool_calls = [{"id": "tc1", "function": {"name": "search", "arguments": "{}"}}]
+        msg = ChatMessage(role=MessageRole.assistant, content=None, tool_calls=tool_calls)
+        assert msg.tool_calls == tool_calls
 
-    def test_coordinates_must_be_normalized(self):
-        with pytest.raises(ValidationError):
-            BoundingBoxSchema(x1=-0.1, y1=0.0, x2=0.5, y2=0.5)
-
-    def test_coordinates_max_one(self):
-        with pytest.raises(ValidationError):
-            BoundingBoxSchema(x1=0.0, y1=0.0, x2=1.5, y2=1.0)
-
-    def test_exactly_equal_x1_x2_raises(self):
-        with pytest.raises(ValidationError):
-            BoundingBoxSchema(x1=0.5, y1=0.0, x2=0.5, y2=1.0)
+    def test_list_content(self):
+        content = [{"type": "text", "text": "Hello"}]
+        msg = ChatMessage(role=MessageRole.user, content=content)
+        assert isinstance(msg.content, list)
 
 
-# ---------------------------------------------------------------------------
-# DetectRequest
-# ---------------------------------------------------------------------------
-
-
-class TestDetectRequest:
-    def test_valid_detect_request(self):
-        req = DetectRequest(image_b64="abc123")
-        assert req.image_b64 == "abc123"
-        assert req.run_spread_prediction is False
-
-    def test_empty_b64_raises(self):
-        with pytest.raises(ValidationError):
-            DetectRequest(image_b64="")
-
-    def test_with_camera_id_and_coords(self):
-        req = DetectRequest(
-            image_b64="data",
-            camera_id="cam-001",
-            latitude=37.77,
-            longitude=-119.55,
+class TestChatCompletionRequest:
+    def test_minimal_valid_request(self):
+        req = ChatCompletionRequest(
+            model="claude-haiku-4-5",
+            messages=[ChatMessage(role=MessageRole.user, content="Hi")],
         )
-        assert req.camera_id == "cam-001"
-        assert req.latitude == pytest.approx(37.77)
+        assert req.model == "claude-haiku-4-5"
+        assert len(req.messages) == 1
 
-    def test_latitude_out_of_range(self):
+    def test_empty_messages_raises(self):
+        with pytest.raises(ValidationError, match="messages must not be empty"):
+            ChatCompletionRequest(model="claude-haiku-4-5", messages=[])
+
+    def test_default_temperature(self):
+        req = ChatCompletionRequest(
+            model="gpt-4o",
+            messages=[ChatMessage(role=MessageRole.user, content="Hi")],
+        )
+        assert req.temperature == 1.0
+
+    def test_temperature_out_of_range_raises(self):
         with pytest.raises(ValidationError):
-            DetectRequest(image_b64="data", latitude=95.0)
-
-    def test_longitude_out_of_range(self):
-        with pytest.raises(ValidationError):
-            DetectRequest(image_b64="data", longitude=200.0)
-
-    def test_spread_prediction_flag(self):
-        req = DetectRequest(image_b64="data", run_spread_prediction=True)
-        assert req.run_spread_prediction is True
-
-    def test_default_spread_horizons(self):
-        req = DetectRequest(image_b64="data")
-        assert req.spread_horizons_minutes == [30, 60, 120]
-
-
-# ---------------------------------------------------------------------------
-# BatchDetectRequest
-# ---------------------------------------------------------------------------
-
-
-class TestBatchDetectRequest:
-    def test_valid_batch(self):
-        req = BatchDetectRequest(images_b64=["img1", "img2", "img3"])
-        assert len(req.images_b64) == 3
-
-    def test_empty_batch_raises(self):
-        with pytest.raises(ValidationError):
-            BatchDetectRequest(images_b64=[])
-
-    def test_exceeds_max_batch_raises(self):
-        with pytest.raises(ValidationError):
-            BatchDetectRequest(images_b64=["x"] * 17)
-
-    def test_exactly_16_ok(self):
-        req = BatchDetectRequest(images_b64=["x"] * 16)
-        assert len(req.images_b64) == 16
-
-
-# ---------------------------------------------------------------------------
-# RiskZoneRequest
-# ---------------------------------------------------------------------------
-
-
-class TestRiskZoneRequest:
-    def test_defaults(self):
-        req = RiskZoneRequest()
-        assert req.detection_confidence == 0.0
-        assert req.days_since_rain == 0
-        assert req.vegetation_type == "unknown"
-        assert req.month == 7
-
-    def test_confidence_out_of_range_raises(self):
-        with pytest.raises(ValidationError):
-            RiskZoneRequest(detection_confidence=1.5)
-
-    def test_negative_days_raises(self):
-        with pytest.raises(ValidationError):
-            RiskZoneRequest(days_since_rain=-1)
-
-    def test_month_out_of_range(self):
-        with pytest.raises(ValidationError):
-            RiskZoneRequest(month=13)
-
-    def test_month_zero_raises(self):
-        with pytest.raises(ValidationError):
-            RiskZoneRequest(month=0)
-
-
-# ---------------------------------------------------------------------------
-# AcknowledgeRequest
-# ---------------------------------------------------------------------------
-
-
-class TestAcknowledgeRequest:
-    def test_valid(self):
-        req = AcknowledgeRequest(acknowledged_by="operator-1")
-        assert req.acknowledged_by == "operator-1"
-
-    def test_empty_by_raises(self):
-        with pytest.raises(ValidationError):
-            AcknowledgeRequest(acknowledged_by="")
-
-    def test_long_name_raises(self):
-        with pytest.raises(ValidationError):
-            AcknowledgeRequest(acknowledged_by="x" * 101)
-
-
-# ---------------------------------------------------------------------------
-# TransitionRequest
-# ---------------------------------------------------------------------------
-
-
-class TestTransitionRequest:
-    def test_valid(self):
-        req = TransitionRequest(new_status="RESPONDING", updated_by="dispatch")
-        assert req.new_status == "RESPONDING"
-        assert req.note == ""
-
-    def test_empty_updated_by_raises(self):
-        with pytest.raises(ValidationError):
-            TransitionRequest(new_status="RESPONDING", updated_by="")
-
-    def test_negative_area_raises(self):
-        with pytest.raises(ValidationError):
-            TransitionRequest(
-                new_status="RESPONDING",
-                updated_by="sys",
-                affected_area_ha=-1.0,
+            ChatCompletionRequest(
+                model="gpt-4o",
+                messages=[ChatMessage(role=MessageRole.user, content="Hi")],
+                temperature=3.0,
             )
 
-    def test_risk_score_out_of_range(self):
+    def test_stream_defaults_false(self):
+        req = ChatCompletionRequest(
+            model="gpt-4o",
+            messages=[ChatMessage(role=MessageRole.user, content="Hi")],
+        )
+        assert req.stream is False
+
+    def test_effective_max_tokens_uses_max_completion_tokens(self):
+        req = ChatCompletionRequest(
+            model="gpt-4o",
+            messages=[ChatMessage(role=MessageRole.user, content="Hi")],
+            max_completion_tokens=512,
+            max_tokens=256,
+        )
+        assert req.effective_max_tokens() == 512
+
+    def test_effective_max_tokens_falls_back_to_max_tokens(self):
+        req = ChatCompletionRequest(
+            model="gpt-4o",
+            messages=[ChatMessage(role=MessageRole.user, content="Hi")],
+            max_tokens=300,
+        )
+        assert req.effective_max_tokens() == 300
+
+    def test_effective_max_tokens_returns_none_when_unset(self):
+        req = ChatCompletionRequest(
+            model="gpt-4o",
+            messages=[ChatMessage(role=MessageRole.user, content="Hi")],
+        )
+        assert req.effective_max_tokens() is None
+
+    def test_top_p_out_of_range_raises(self):
         with pytest.raises(ValidationError):
-            TransitionRequest(
-                new_status="RESPONDING",
-                updated_by="sys",
-                risk_score=1.5,
+            ChatCompletionRequest(
+                model="gpt-4o",
+                messages=[ChatMessage(role=MessageRole.user, content="Hi")],
+                top_p=1.5,
             )
 
-    def test_note_max_length_500(self):
-        # Exactly 500 chars is fine
-        req = TransitionRequest(new_status="RESPONDING", updated_by="sys", note="x" * 500)
-        assert len(req.note) == 500
-
-    def test_note_over_500_raises(self):
+    def test_max_tokens_negative_raises(self):
         with pytest.raises(ValidationError):
-            TransitionRequest(new_status="RESPONDING", updated_by="sys", note="x" * 501)
-
-
-# ---------------------------------------------------------------------------
-# FWIComponentsSchema
-# ---------------------------------------------------------------------------
-
-
-class TestFWIComponentsSchema:
-    def test_valid(self):
-        fwi = FWIComponentsSchema(
-            ffmc=88.5, dmc=12.3, dc=45.0, isi=8.7, bui=10.2, fwi=15.4, dsr=1.2
-        )
-        assert fwi.fwi == pytest.approx(15.4)
-
-
-# ---------------------------------------------------------------------------
-# SpreadHorizonSchema
-# ---------------------------------------------------------------------------
-
-
-class TestSpreadHorizonSchema:
-    def test_valid(self):
-        s = SpreadHorizonSchema(
-            time_horizon_minutes=30,
-            affected_area_hectares=12.5,
-            num_active_fire_cells=100,
-            num_distinct_fire_regions=1,
-            spot_fire_risk=0.15,
-            evacuation_buffer_cells=67,
-            perimeter_point_count=42,
-        )
-        assert s.spot_fire_risk == pytest.approx(0.15)
-
-    def test_spot_fire_risk_out_of_range(self):
-        with pytest.raises(ValidationError):
-            SpreadHorizonSchema(
-                time_horizon_minutes=30,
-                affected_area_hectares=10.0,
-                num_active_fire_cells=50,
-                num_distinct_fire_regions=1,
-                spot_fire_risk=1.5,
-                evacuation_buffer_cells=67,
-                perimeter_point_count=20,
+            ChatCompletionRequest(
+                model="gpt-4o",
+                messages=[ChatMessage(role=MessageRole.user, content="Hi")],
+                max_tokens=-1,
             )
 
+    def test_response_format_json_object(self):
+        req = ChatCompletionRequest(
+            model="gpt-4o",
+            messages=[ChatMessage(role=MessageRole.user, content="Hi")],
+            response_format=ResponseFormat(type="json_object"),
+        )
+        assert req.response_format.type == "json_object"
 
-# ---------------------------------------------------------------------------
-# StreamFrame
-# ---------------------------------------------------------------------------
+    def test_stop_string(self):
+        req = ChatCompletionRequest(
+            model="gpt-4o",
+            messages=[ChatMessage(role=MessageRole.user, content="Hi")],
+            stop="\n",
+        )
+        assert req.stop == "\n"
+
+    def test_stop_list(self):
+        req = ChatCompletionRequest(
+            model="gpt-4o",
+            messages=[ChatMessage(role=MessageRole.user, content="Hi")],
+            stop=["\n", "END"],
+        )
+        assert req.stop == ["\n", "END"]
+
+    def test_x_provider_alias(self):
+        req = ChatCompletionRequest(
+            model="gpt-4o",
+            messages=[ChatMessage(role=MessageRole.user, content="Hi")],
+            **{"x-provider": "anthropic"},
+        )
+        assert req.x_provider == "anthropic"
 
 
-class TestStreamFrame:
+class TestUsageInfo:
+    def test_defaults_are_zero(self):
+        u = UsageInfo()
+        assert u.prompt_tokens == 0
+        assert u.completion_tokens == 0
+        assert u.total_tokens == 0
+
+    def test_explicit_values(self):
+        u = UsageInfo(prompt_tokens=10, completion_tokens=20, total_tokens=30)
+        assert u.total_tokens == 30
+
+
+class TestChatCompletionResponse:
+    def _make_response(self, **kwargs):
+        defaults = dict(
+            model="claude-haiku-4-5",
+            choices=[
+                Choice(
+                    index=0,
+                    message=ChoiceMessage(role="assistant", content="Hi"),
+                    finish_reason="stop",
+                )
+            ],
+        )
+        defaults.update(kwargs)
+        return ChatCompletionResponse(**defaults)
+
+    def test_id_starts_with_chatcmpl(self):
+        resp = self._make_response()
+        assert resp.id.startswith("chatcmpl-")
+
+    def test_object_is_chat_completion(self):
+        resp = self._make_response()
+        assert resp.object == "chat.completion"
+
+    def test_created_is_recent_timestamp(self):
+        before = int(time.time()) - 2
+        resp = self._make_response()
+        assert resp.created >= before
+
+    def test_gateway_metadata_aliases(self):
+        resp = self._make_response(
+            **{
+                "x-gateway-provider": "openai",
+                "x-gateway-cache": "hit",
+                "x-gateway-cost-usd": 0.001,
+                "x-gateway-latency-ms": 250,
+            }
+        )
+        assert resp.x_gateway_provider == "openai"
+        assert resp.x_gateway_cache == "hit"
+        assert resp.x_gateway_cost_usd == pytest.approx(0.001)
+        assert resp.x_gateway_latency_ms == 250
+
+
+class TestChatCompletionChunk:
+    def test_id_starts_with_chatcmpl(self):
+        chunk = ChatCompletionChunk(
+            model="claude-haiku-4-5",
+            choices=[
+                StreamChoice(
+                    index=0,
+                    delta=ChoiceDelta(role="assistant", content="Hi"),
+                )
+            ],
+        )
+        assert chunk.id.startswith("chatcmpl-")
+
+    def test_object_is_chunk(self):
+        chunk = ChatCompletionChunk(
+            model="gpt-4o",
+            choices=[StreamChoice(index=0, delta=ChoiceDelta(content=" world"))],
+        )
+        assert chunk.object == "chat.completion.chunk"
+
+    def test_usage_defaults_to_none(self):
+        chunk = ChatCompletionChunk(
+            model="gpt-4o",
+            choices=[StreamChoice(index=0, delta=ChoiceDelta(content="Hi"))],
+        )
+        assert chunk.usage is None
+
+
+class TestModelObject:
+    def test_owned_by_default(self):
+        m = ModelObject(id="claude-haiku-4-5")
+        assert m.owned_by == "llm-gateway"
+        assert m.object == "model"
+
+    def test_custom_owned_by(self):
+        m = ModelObject(id="gpt-4o", owned_by="openai")
+        assert m.owned_by == "openai"
+
+
+class TestModelsListResponse:
+    def test_object_is_list(self):
+        r = ModelsListResponse(data=[ModelObject(id="gpt-4o")])
+        assert r.object == "list"
+
+    def test_data_preserved(self):
+        models = [ModelObject(id="a"), ModelObject(id="b")]
+        r = ModelsListResponse(data=models)
+        assert len(r.data) == 2
+
+
+class TestProviderName:
+    def test_all_providers(self):
+        providers = {p.value for p in ProviderName}
+        assert providers == {"anthropic", "openai", "ollama"}
+
+
+class TestRoutingDecision:
     def test_valid(self):
-        sf = StreamFrame(
-            frame_id=1,
-            camera_id="cam-001",
-            has_fire=True,
-            has_smoke=False,
-            max_confidence=0.87,
-            aggregate_severity="HIGH",
-            detection_count=2,
-            inference_time_ms=45.3,
-            timestamp=time.time(),
+        rd = RoutingDecision(
+            provider=ProviderName.anthropic,
+            model="claude-haiku-4-5",
+            reason="cost",
+            original_model="claude-haiku-4-5",
         )
-        assert sf.alert_id is None
+        assert rd.provider == ProviderName.anthropic
+        assert rd.fallback_chain == []
 
-    def test_with_alert_id(self):
-        sf = StreamFrame(
-            frame_id=2,
-            camera_id="cam-002",
-            has_fire=False,
-            has_smoke=False,
-            max_confidence=0.0,
-            aggregate_severity="low",
-            detection_count=0,
-            inference_time_ms=10.0,
-            alert_id="some-uuid",
-            timestamp=time.time(),
+
+class TestCacheResult:
+    def test_cache_miss_defaults(self):
+        cr = CacheResult(hit=False)
+        assert cr.hit is False
+        assert cr.response is None
+        assert cr.similarity == 0.0
+        assert cr.cache_key is None
+
+    def test_cache_hit(self):
+        response = ChatCompletionResponse(
+            model="gpt-4o",
+            choices=[
+                Choice(
+                    index=0,
+                    message=ChoiceMessage(role="assistant", content="cached"),
+                    finish_reason="stop",
+                )
+            ],
         )
-        assert sf.alert_id == "some-uuid"
+        cr = CacheResult(hit=True, response=response, similarity=0.95, cache_key="abc123")
+        assert cr.hit is True
+        assert cr.similarity == pytest.approx(0.95)
+        assert cr.cache_key == "abc123"
 
 
-# ---------------------------------------------------------------------------
-# StreamSubscribeMessage
-# ---------------------------------------------------------------------------
-
-
-class TestStreamSubscribeMessage:
-    def test_valid_subscribe(self):
-        msg = StreamSubscribeMessage(action="subscribe", camera_id="cam-001")
-        assert msg.action == "subscribe"
-        assert msg.include_detections is True
-
-    def test_valid_unsubscribe(self):
-        msg = StreamSubscribeMessage(action="unsubscribe", camera_id="cam-001")
-        assert msg.action == "unsubscribe"
-
-    def test_valid_ping(self):
-        msg = StreamSubscribeMessage(action="ping", camera_id="cam-001")
-        assert msg.action == "ping"
-
-    def test_invalid_action_raises(self):
-        with pytest.raises(ValidationError):
-            StreamSubscribeMessage(action="invalid", camera_id="cam-001")
-
-
-# ---------------------------------------------------------------------------
-# HealthResponse / ComponentHealth
-# ---------------------------------------------------------------------------
-
-
-class TestComponentHealth:
-    def test_ok_status(self):
-        ch = ComponentHealth(status="ok")
-        assert ch.status == "ok"
-        assert ch.latency_ms is None
-
-    def test_with_latency(self):
-        ch = ComponentHealth(status="degraded", latency_ms=120.5, detail="Slow response")
-        assert ch.latency_ms == pytest.approx(120.5)
-
-
-class TestHealthResponse:
+class TestCostRecord:
     def test_valid(self):
-        hr = HealthResponse(
-            status="ok",
-            version="1.0.0",
-            uptime_seconds=3600.0,
-            components={
-                "detector": ComponentHealth(status="ok"),
-                "weather": ComponentHealth(status="ok", latency_ms=50.0),
-            },
-            active_alerts=2,
-            active_incidents=1,
-            timestamp=time.time(),
+        cr = CostRecord(
+            request_id="req-1",
+            api_key_hash="hash123",
+            provider="anthropic",
+            model="claude-haiku-4-5",
+            prompt_tokens=100,
+            completion_tokens=50,
+            total_tokens=150,
+            cost_usd=0.001,
+            latency_ms=300,
+            cache_hit=False,
         )
-        assert hr.active_alerts == 2
-        assert "detector" in hr.components
+        assert cr.request_id == "req-1"
+        assert cr.cache_hit is False
+        assert cr.timestamp > 0
+
+
+class TestRateLimitInfo:
+    def test_allowed(self):
+        rl = RateLimitInfo(
+            allowed=True,
+            remaining_requests=99,
+            remaining_tokens=9000,
+            reset_at=time.time() + 60,
+        )
+        assert rl.allowed is True
+        assert rl.retry_after is None
+
+    def test_denied_with_retry_after(self):
+        rl = RateLimitInfo(
+            allowed=False,
+            remaining_requests=0,
+            remaining_tokens=0,
+            reset_at=time.time() + 30,
+            retry_after=30.0,
+        )
+        assert rl.allowed is False
+        assert rl.retry_after == pytest.approx(30.0)
+
+
+class TestHealthStatus:
+    def test_healthy(self):
+        hs = HealthStatus(provider="anthropic", healthy=True, latency_ms=120.5)
+        assert hs.healthy is True
+        assert hs.latency_ms == pytest.approx(120.5)
+        assert hs.error is None
+
+    def test_unhealthy_with_error(self):
+        hs = HealthStatus(provider="openai", healthy=False, error="Connection refused")
+        assert hs.healthy is False
+        assert hs.error == "Connection refused"
+
+
+class TestGatewayStats:
+    def test_valid(self):
+        gs = GatewayStats(
+            total_requests=1000,
+            cache_hit_rate=0.35,
+            total_cost_usd=1.5,
+            requests_by_provider={"anthropic": 600, "openai": 400},
+            avg_latency_ms=280.0,
+            error_rate=0.01,
+            uptime_seconds=86400.0,
+        )
+        assert gs.total_requests == 1000
+        assert gs.cache_hit_rate == pytest.approx(0.35)
+
+
+class TestErrorResponse:
+    def test_create_factory(self):
+        err = ErrorResponse.create("Something went wrong")
+        assert err.error["message"] == "Something went wrong"
+        assert err.error["type"] == "invalid_request_error"
+        assert err.error["code"] is None
+        assert err.error["param"] is None
+
+    def test_create_with_custom_type_and_code(self):
+        err = ErrorResponse.create("Auth failed", type_="authentication_error", code="401")
+        assert err.error["type"] == "authentication_error"
+        assert err.error["code"] == "401"
+
+    def test_error_is_dict(self):
+        err = ErrorResponse.create("Bad request")
+        assert isinstance(err.error, dict)
+
+
+class TestResponseFormat:
+    def test_default_type_is_text(self):
+        rf = ResponseFormat()
+        assert rf.type == "text"
+
+    def test_json_object_type(self):
+        rf = ResponseFormat(type="json_object")
+        assert rf.type == "json_object"
+
+
+class TestStreamOptions:
+    def test_include_usage_defaults_false(self):
+        so = StreamOptions()
+        assert so.include_usage is False
+
+    def test_include_usage_true(self):
+        so = StreamOptions(include_usage=True)
+        assert so.include_usage is True
