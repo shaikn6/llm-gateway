@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+import openai
+
 
 class OpenAIProvider:
     """Lightweight OpenAI wrapper used by GatewayRouter."""
 
     def __init__(self, api_key: str):
-        import openai
-
         self._client = openai.OpenAI(api_key=api_key)
 
     def complete(self, messages: list[dict], model: str = "gpt-4o-mini", **kwargs) -> dict:
