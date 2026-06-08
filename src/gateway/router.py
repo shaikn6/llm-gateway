@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from src.providers.anthropic import AnthropicProvider
+from src.providers.openai_provider import OpenAIProvider
 
 
 class GatewayRouter:
@@ -14,8 +15,6 @@ class GatewayRouter:
     def route(self, model: str):
         if model.startswith("gpt") or model.startswith("o1"):
             if self._openai is None:
-                from src.providers.openai_provider import OpenAIProvider
-
                 self._openai = OpenAIProvider(api_key=self._openai_key)
             return self._openai
         return self._anthropic
