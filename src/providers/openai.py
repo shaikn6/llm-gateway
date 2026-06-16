@@ -135,3 +135,6 @@ class OpenAIAsyncProvider(LLMProvider):
             return HealthStatus(
                 provider=self.name, healthy=False, latency_ms=latency_ms, error=str(exc)
             )
+
+
+OpenAIProvider = OpenAIAsyncProvider
