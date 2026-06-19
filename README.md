@@ -1,3 +1,5 @@
+<p align="center"><img src=".github/banner.png" alt="llm-gateway" width="100%"></p>
+
 <div align="center">
 
 # LLM Gateway
