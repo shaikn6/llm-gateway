@@ -12,7 +12,7 @@ keywords:
   - redis
 maintainers:
   - name: Nagizaaz Shaik
-    email: shaik.izaaz009@gmail.com
+    email: nagizaazs@gmail.com
 dependencies:
   - name: redis
     version: "19.x.x"
