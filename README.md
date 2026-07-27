@@ -8,6 +8,8 @@
 [![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker)](docker-compose.yml)
+[![Tests](https://img.shields.io/badge/tests-312%20passing-brightgreen)](tests/)
+[![Coverage](https://img.shields.io/badge/coverage-99%25-brightgreen)](tests/)
 
 **A single OpenAI-compatible endpoint in front of Anthropic and OpenAI — with Redis-backed caching, sliding-window rate limiting, deterministic A/B routing, and per-key cost tracking.**
 
@@ -94,7 +96,7 @@ Configuration is environment-driven (`.env`): `ANTHROPIC_API_KEY`, `OPENAI_API_K
 
 ## Testing
 
-The suite has **312 test functions across 17 files** (`tests/`), covering the provider adapters (including Anthropic message conversion and streaming), the A/B router's bucketing math, the sliding-window limiter, cache hit/miss paths, usage/cost aggregation, and the API endpoints. Run `pytest --cov=src` for coverage.
+The suite has **312 test functions across 17 files** (`tests/`), covering the provider adapters (including Anthropic message conversion and streaming), the A/B router's bucketing math, the sliding-window limiter, cache hit/miss paths, usage/cost aggregation, and the API endpoints. Line coverage on `src/` is currently 99% (`pytest --cov=src --cov-report=term-missing`).
 
 ## Deployment
 
