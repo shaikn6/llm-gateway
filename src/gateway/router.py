@@ -29,7 +29,7 @@ class GatewayRouter:
             if self._ollama is None:
                 self._ollama = OllamaProvider(base_url=self._ollama_base_url)
             return self._ollama
-        if model.startswith("gpt") or model.startswith("o1"):
+        if model.startswith(("gpt", "o1")):
             if self._openai is None:
                 self._openai = OpenAIProvider(api_key=self._openai_key)
             return self._openai

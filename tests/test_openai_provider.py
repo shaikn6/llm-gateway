@@ -2,24 +2,25 @@
 
 from __future__ import annotations
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.providers.openai import OpenAIAsyncProvider, OPENAI_MODELS
+import pytest
+
+from src.models.schemas import ChatCompletionRequest, ChatCompletionResponse
 from src.providers.base import (
     ProviderAuthError,
     ProviderError,
     ProviderRateLimitError,
     ProviderTimeoutError,
 )
-from src.models.schemas import ChatCompletionRequest, ChatCompletionResponse
+from src.providers.openai import OPENAI_MODELS, OpenAIAsyncProvider
 
 
 def _make_request(**kwargs):
-    defaults = dict(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": "Hello"}],
-    )
+    defaults = {
+        "model": "gpt-4o-mini",
+        "messages": [{"role": "user", "content": "Hello"}],
+    }
     defaults.update(kwargs)
     return ChatCompletionRequest(**defaults)
 
@@ -32,17 +33,14 @@ def _make_mock_openai_response(content="Hello from OpenAI", model="gpt-4o-mini")
     choice.message.content = content
     choice.finish_reason = "stop"
     resp.choices = [choice]
-    resp.usage = MagicMock(
-        prompt_tokens=10, completion_tokens=20, total_tokens=30
-    )
+    resp.usage = MagicMock(prompt_tokens=10, completion_tokens=20, total_tokens=30)
     return resp
 
 
 class TestOpenAIAsyncProviderInit:
     def test_raises_auth_error_when_no_key(self):
-        with patch.dict("os.environ", {}, clear=True):
-            with pytest.raises(ProviderAuthError):
-                OpenAIAsyncProvider(api_key=None)
+        with patch.dict("os.environ", {}, clear=True), pytest.raises(ProviderAuthError):
+            OpenAIAsyncProvider(api_key=None)
 
     def test_accepts_explicit_api_key(self):
         with patch("src.providers.openai.openai_lib.AsyncOpenAI"):
@@ -50,9 +48,11 @@ class TestOpenAIAsyncProviderInit:
         assert provider.api_key == "sk-openai-test"
 
     def test_accepts_env_var_key(self):
-        with patch.dict("os.environ", {"OPENAI_API_KEY": "env-openai-key"}):
-            with patch("src.providers.openai.openai_lib.AsyncOpenAI"):
-                provider = OpenAIAsyncProvider()
+        with (
+            patch.dict("os.environ", {"OPENAI_API_KEY": "env-openai-key"}),
+            patch("src.providers.openai.openai_lib.AsyncOpenAI"),
+        ):
+            provider = OpenAIAsyncProvider()
         assert provider.api_key == "env-openai-key"
 
     def test_provider_name_is_openai(self):
@@ -97,6 +97,7 @@ class TestOpenAIAsyncProviderComplete:
     @pytest.mark.asyncio
     async def test_complete_raises_auth_error_on_auth_failure(self):
         import openai
+
         mock_client = AsyncMock()
         mock_client.chat.completions.create = AsyncMock(
             side_effect=openai.AuthenticationError(
@@ -116,6 +117,7 @@ class TestOpenAIAsyncProviderComplete:
     @pytest.mark.asyncio
     async def test_complete_raises_rate_limit_error(self):
         import openai
+
         mock_client = AsyncMock()
         mock_client.chat.completions.create = AsyncMock(
             side_effect=openai.RateLimitError(
@@ -135,6 +137,7 @@ class TestOpenAIAsyncProviderComplete:
     @pytest.mark.asyncio
     async def test_complete_raises_timeout_error(self):
         import openai
+
         mock_client = AsyncMock()
         mock_client.chat.completions.create = AsyncMock(
             side_effect=openai.APITimeoutError(request=MagicMock())
@@ -150,6 +153,7 @@ class TestOpenAIAsyncProviderComplete:
     @pytest.mark.asyncio
     async def test_complete_raises_provider_error_on_api_error(self):
         import openai
+
         mock_client = AsyncMock()
         mock_client.chat.completions.create = AsyncMock(
             side_effect=openai.APIError(

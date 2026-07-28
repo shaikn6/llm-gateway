@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import time
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 
@@ -31,10 +31,10 @@ import pytest
 def _make_request(**kwargs):
     from src.models.schemas import ChatCompletionRequest, ChatMessage, MessageRole
 
-    defaults = dict(
-        model="claude-3-haiku-20240307",
-        messages=[ChatMessage(role=MessageRole.user, content="Hello")],
-    )
+    defaults = {
+        "model": "claude-3-haiku-20240307",
+        "messages": [ChatMessage(role=MessageRole.user, content="Hello")],
+    }
     defaults.update(kwargs)
     return ChatCompletionRequest(**defaults)
 
@@ -42,10 +42,10 @@ def _make_request(**kwargs):
 def _make_openai_request(**kwargs):
     from src.models.schemas import ChatCompletionRequest
 
-    defaults = dict(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": "Hello"}],
-    )
+    defaults = {
+        "model": "gpt-4o-mini",
+        "messages": [{"role": "user", "content": "Hello"}],
+    }
     defaults.update(kwargs)
     return ChatCompletionRequest(**defaults)
 
@@ -58,6 +58,7 @@ def _make_openai_request(**kwargs):
 class TestChatCompletionRequestValidation:
     def test_empty_messages_raises_validation_error(self):
         from pydantic import ValidationError
+
         from src.models.schemas import ChatCompletionRequest
 
         with pytest.raises(ValidationError, match="messages must not be empty"):
@@ -95,6 +96,7 @@ class TestChatCompletionRequestValidation:
 
     def test_temperature_out_of_range_raises(self):
         from pydantic import ValidationError
+
         from src.models.schemas import ChatCompletionRequest
 
         with pytest.raises(ValidationError):
@@ -106,6 +108,7 @@ class TestChatCompletionRequestValidation:
 
     def test_top_p_out_of_range_raises(self):
         from pydantic import ValidationError
+
         from src.models.schemas import ChatCompletionRequest
 
         with pytest.raises(ValidationError):
@@ -117,6 +120,7 @@ class TestChatCompletionRequestValidation:
 
     def test_n_out_of_range_raises(self):
         from pydantic import ValidationError
+
         from src.models.schemas import ChatCompletionRequest
 
         with pytest.raises(ValidationError):
@@ -189,7 +193,7 @@ class TestErrorResponseCreate:
 
 class TestSchemaModels:
     def test_models_list_response(self):
-        from src.models.schemas import ModelsListResponse, ModelObject
+        from src.models.schemas import ModelObject, ModelsListResponse
 
         obj = ModelObject(id="gpt-4o", owned_by="openai")
         resp = ModelsListResponse(data=[obj])
@@ -197,7 +201,7 @@ class TestSchemaModels:
         assert len(resp.data) == 1
 
     def test_routing_decision_model(self):
-        from src.models.schemas import RoutingDecision, ProviderName
+        from src.models.schemas import ProviderName, RoutingDecision
 
         rd = RoutingDecision(
             provider=ProviderName.anthropic,
@@ -277,7 +281,7 @@ class TestSchemaModels:
         assert resp.id.startswith("chatcmpl-")
 
     def test_chat_completion_chunk_defaults(self):
-        from src.models.schemas import ChatCompletionChunk, StreamChoice, ChoiceDelta
+        from src.models.schemas import ChatCompletionChunk, ChoiceDelta, StreamChoice
 
         chunk = ChatCompletionChunk(
             model="gpt-4o",
@@ -394,8 +398,9 @@ class TestAnthropicProviderStream:
     @pytest.mark.asyncio
     async def test_stream_yields_content_block_delta_chunks(self):
         import anthropic
-        from src.providers.anthropic import AnthropicProvider
+
         from src.models.schemas import ChatCompletionChunk
+        from src.providers.anthropic import AnthropicProvider
 
         event1 = MagicMock()
         event1.type = "content_block_delta"
@@ -438,6 +443,7 @@ class TestAnthropicProviderStream:
     @pytest.mark.asyncio
     async def test_stream_raises_auth_error(self):
         import anthropic
+
         from src.providers.anthropic import AnthropicProvider
         from src.providers.base import ProviderAuthError
 
@@ -465,6 +471,7 @@ class TestAnthropicProviderStream:
     @pytest.mark.asyncio
     async def test_stream_raises_rate_limit_error(self):
         import anthropic
+
         from src.providers.anthropic import AnthropicProvider
         from src.providers.base import ProviderRateLimitError
 
@@ -492,6 +499,7 @@ class TestAnthropicProviderStream:
     @pytest.mark.asyncio
     async def test_stream_raises_timeout_error(self):
         import anthropic
+
         from src.providers.anthropic import AnthropicProvider
         from src.providers.base import ProviderTimeoutError
 
@@ -515,6 +523,7 @@ class TestAnthropicProviderStream:
     @pytest.mark.asyncio
     async def test_stream_raises_api_error(self):
         import anthropic
+
         from src.providers.anthropic import AnthropicProvider
         from src.providers.base import ProviderError
 
@@ -544,8 +553,8 @@ class TestConvertMessagesExtended:
     """Additional _convert_messages branches not covered by existing tests."""
 
     def test_tool_message_converted_to_tool_result(self):
-        from src.providers.anthropic import _convert_messages
         from src.models.schemas import ChatCompletionRequest, ChatMessage, MessageRole
+        from src.providers.anthropic import _convert_messages
 
         req = ChatCompletionRequest(
             model="claude-3-haiku-20240307",
@@ -565,8 +574,8 @@ class TestConvertMessagesExtended:
         assert tool_result_msg["content"][0]["tool_use_id"] == "call_abc"
 
     def test_assistant_with_tool_calls_produces_tool_use_blocks(self):
-        from src.providers.anthropic import _convert_messages
         from src.models.schemas import ChatCompletionRequest, ChatMessage, MessageRole
+        from src.providers.anthropic import _convert_messages
 
         req = ChatCompletionRequest(
             model="claude-3-haiku-20240307",
@@ -597,8 +606,8 @@ class TestConvertMessagesExtended:
 
     def test_list_content_passed_through(self):
         """When content is a list (multimodal), it should be passed as-is."""
-        from src.providers.anthropic import _convert_messages
         from src.models.schemas import ChatCompletionRequest, ChatMessage, MessageRole
+        from src.providers.anthropic import _convert_messages
 
         content_list = [
             {"type": "text", "text": "Hello"},
@@ -613,8 +622,8 @@ class TestConvertMessagesExtended:
 
     def test_function_role_treated_as_assistant(self):
         """The function role should map to assistant (not system/tool)."""
-        from src.providers.anthropic import _convert_messages
         from src.models.schemas import ChatCompletionRequest, ChatMessage, MessageRole
+        from src.providers.anthropic import _convert_messages
 
         req = ChatCompletionRequest(
             model="claude-3-haiku-20240307",
@@ -683,6 +692,7 @@ class TestAnthropicBuildKwargs:
     @pytest.mark.asyncio
     async def test_complete_raises_api_error(self):
         import anthropic
+
         from src.providers.anthropic import AnthropicProvider
         from src.providers.base import ProviderError
 
@@ -739,8 +749,8 @@ class TestAnthropicBuildKwargs:
 class TestOpenAIAsyncProviderStream:
     @pytest.mark.asyncio
     async def test_stream_yields_chunks(self):
-        from src.providers.openai import OpenAIAsyncProvider
         from src.models.schemas import ChatCompletionChunk
+        from src.providers.openai import OpenAIAsyncProvider
 
         chunk1 = MagicMock()
         chunk1.choices = [MagicMock()]
@@ -781,8 +791,9 @@ class TestOpenAIAsyncProviderStream:
     @pytest.mark.asyncio
     async def test_stream_raises_provider_error_on_api_error(self):
         import openai
-        from src.providers.openai import OpenAIAsyncProvider
+
         from src.providers.base import ProviderError
+        from src.providers.openai import OpenAIAsyncProvider
 
         mock_stream = AsyncMock()
         mock_stream.__aenter__ = AsyncMock(
@@ -844,8 +855,8 @@ class TestOpenAIAsyncProviderStream:
 class TestOllamaProviderStream:
     @pytest.mark.asyncio
     async def test_stream_yields_chunks_until_done(self):
-        from src.providers.ollama import OllamaProvider
         from src.models.schemas import ChatCompletionChunk
+        from src.providers.ollama import OllamaProvider
 
         lines = [
             json.dumps({"message": {"content": "Hello"}, "done": False}),
@@ -918,8 +929,9 @@ class TestOllamaProviderStream:
     @pytest.mark.asyncio
     async def test_stream_raises_provider_error_on_http_error(self):
         import httpx
-        from src.providers.ollama import OllamaProvider
+
         from src.providers.base import ProviderError
+        from src.providers.ollama import OllamaProvider
 
         mock_stream_ctx = AsyncMock()
         mock_stream_ctx.__aenter__ = AsyncMock(
@@ -1036,6 +1048,7 @@ class TestGetRouterSingleton:
 
     def test_health_endpoint_returns_version(self):
         from fastapi.testclient import TestClient
+
         from src.api.main import app
 
         client = TestClient(app)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import AsyncIterator, List, Optional
+from collections.abc import AsyncIterator
 
 import httpx
 
@@ -34,7 +34,7 @@ class OllamaProvider(LLMProvider):
         self,
         base_url: str = OLLAMA_DEFAULT_URL,
         timeout: float = 120.0,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
     ):
         super().__init__(api_key=api_key, timeout=timeout)
         self._base_url = base_url.rstrip("/")
@@ -104,13 +104,16 @@ class OllamaProvider(LLMProvider):
         except httpx.HTTPError as exc:
             raise ProviderError(str(exc), provider=self.name) from exc
 
-    async def list_models(self) -> List[ModelObject]:
+    async def list_models(self) -> list[ModelObject]:
         try:
             resp = await self._client.get("/api/tags")
             resp.raise_for_status()
             data = resp.json()
             return [ModelObject(id=m["name"], owned_by="ollama") for m in data.get("models", [])]
-        except Exception:
+        except Exception:  # noqa: BLE001 - listing models is best-effort;
+            # any failure (network, malformed response) should degrade to an
+            # empty list, not propagate and break a caller that just wants
+            # to know what's available.
             return []
 
     async def health_check(self) -> HealthStatus:
@@ -120,7 +123,9 @@ class OllamaProvider(LLMProvider):
             latency_ms = (time.monotonic() - start) * 1000
             healthy = resp.status_code == 200
             return HealthStatus(provider=self.name, healthy=healthy, latency_ms=latency_ms)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - a health check must report
+            # unhealthy for ANY failure mode, not just the ones we anticipated;
+            # narrowing this would risk the health check itself crashing.
             latency_ms = (time.monotonic() - start) * 1000
             return HealthStatus(
                 provider=self.name, healthy=False, latency_ms=latency_ms, error=str(exc)
