@@ -20,7 +20,9 @@ def get_router() -> GatewayRouter:
     global _gateway
     if _gateway is None:
         _gateway = GatewayRouter(
-            anthropic_key=settings.anthropic_api_key, openai_key=settings.openai_api_key
+            anthropic_key=settings.anthropic_api_key,
+            openai_key=settings.openai_api_key,
+            ollama_base_url=settings.ollama_base_url,
         )
     return _gateway
 

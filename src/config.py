@@ -4,6 +4,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     anthropic_api_key: str = ""
     openai_api_key: str = ""
+    ollama_base_url: str = "http://localhost:11434"
     redis_url: str = "redis://localhost:6379/0"
     cache_enabled: bool = True
     cache_ttl_s: int = 3600
