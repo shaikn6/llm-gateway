@@ -3,21 +3,21 @@
 from __future__ import annotations
 
 import json
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
+import pytest
 
-from src.providers.ollama import OllamaProvider, OLLAMA_DEFAULT_URL
-from src.providers.base import ProviderError, ProviderTimeoutError
 from src.models.schemas import ChatCompletionRequest, ChatCompletionResponse
+from src.providers.base import ProviderError, ProviderTimeoutError
+from src.providers.ollama import OLLAMA_DEFAULT_URL, OllamaProvider
 
 
 def _make_request(**kwargs):
-    defaults = dict(
-        model="llama3",
-        messages=[{"role": "user", "content": "Hello"}],
-    )
+    defaults = {
+        "model": "llama3",
+        "messages": [{"role": "user", "content": "Hello"}],
+    }
     defaults.update(kwargs)
     return ChatCompletionRequest(**defaults)
 

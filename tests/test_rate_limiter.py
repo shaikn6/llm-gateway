@@ -124,7 +124,7 @@ class TestRateLimiterRecord:
         after = time.time()
 
         call_args = mock_redis.zadd.call_args[0]
-        score = list(call_args[1].values())[0]
+        score = next(iter(call_args[1].values()))
         assert before <= score <= after
 
     def test_record_uses_unique_uuid_as_member(self, limiter):
@@ -132,7 +132,7 @@ class TestRateLimiterRecord:
         rl.record("key")
         rl.record("key")
         all_members = [
-            list(call[0][1].keys())[0]
+            next(iter(call[0][1].keys()))
             for call in mock_redis.zadd.call_args_list
         ]
         assert all_members[0] != all_members[1]

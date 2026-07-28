@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import time
 import uuid
-from typing import AsyncIterator, List, Optional
+from collections.abc import AsyncIterator
 
 import openai as openai_lib
 
@@ -44,7 +44,7 @@ class OpenAIAsyncProvider(LLMProvider):
 
     name = "openai"
 
-    def __init__(self, api_key: Optional[str] = None, timeout: float = 60.0):
+    def __init__(self, api_key: str | None = None, timeout: float = 60.0):
         super().__init__(api_key=api_key or os.environ.get("OPENAI_API_KEY"), timeout=timeout)
         if not self.api_key:
             raise ProviderAuthError("OPENAI_API_KEY is not set", provider=self.name)
@@ -121,7 +121,7 @@ class OpenAIAsyncProvider(LLMProvider):
         except openai_lib.APIError as exc:
             raise ProviderError(str(exc), provider=self.name) from exc
 
-    async def list_models(self) -> List[ModelObject]:
+    async def list_models(self) -> list[ModelObject]:
         return [ModelObject(id=model_id, owned_by="openai") for model_id in OPENAI_MODELS]
 
     async def health_check(self) -> HealthStatus:
@@ -130,7 +130,9 @@ class OpenAIAsyncProvider(LLMProvider):
             await self._client.models.list()
             latency_ms = (time.monotonic() - start) * 1000
             return HealthStatus(provider=self.name, healthy=True, latency_ms=latency_ms)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - a health check must report
+            # unhealthy for ANY failure mode, not just the ones we anticipated;
+            # narrowing this would risk the health check itself crashing.
             latency_ms = (time.monotonic() - start) * 1000
             return HealthStatus(
                 provider=self.name, healthy=False, latency_ms=latency_ms, error=str(exc)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import time
 import uuid
-from typing import AsyncIterator, List, Optional
+from collections.abc import AsyncIterator
 
 import anthropic
 
@@ -41,9 +41,9 @@ ANTHROPIC_MODELS: dict[str, int] = {
 
 def _convert_messages(
     request: ChatCompletionRequest,
-) -> tuple[Optional[str], list[dict]]:
+) -> tuple[str | None, list[dict]]:
     """Extract system prompt and convert messages to Anthropic format."""
-    system_prompt: Optional[str] = None
+    system_prompt: str | None = None
     messages: list[dict] = []
 
     for msg in request.messages:
@@ -63,9 +63,7 @@ def _convert_messages(
                         {
                             "type": "tool_result",
                             "tool_use_id": msg.tool_call_id or "",
-                            "content": content
-                            if isinstance(content, str)
-                            else str(content),
+                            "content": content if isinstance(content, str) else str(content),
                         }
                     ],
                 }
@@ -101,10 +99,8 @@ class AnthropicProvider(LLMProvider):
 
     name = "anthropic"
 
-    def __init__(self, api_key: Optional[str] = None, timeout: float = 60.0):
-        super().__init__(
-            api_key=api_key or os.environ.get("ANTHROPIC_API_KEY"), timeout=timeout
-        )
+    def __init__(self, api_key: str | None = None, timeout: float = 60.0):
+        super().__init__(api_key=api_key or os.environ.get("ANTHROPIC_API_KEY"), timeout=timeout)
         if not self.api_key:
             raise ProviderAuthError("ANTHROPIC_API_KEY is not set", provider=self.name)
         self._client = anthropic.AsyncAnthropic(api_key=self.api_key, timeout=timeout)
@@ -170,9 +166,7 @@ class AnthropicProvider(LLMProvider):
             usage=usage,
         )
 
-    async def stream(
-        self, request: ChatCompletionRequest
-    ) -> AsyncIterator[ChatCompletionChunk]:
+    async def stream(self, request: ChatCompletionRequest) -> AsyncIterator[ChatCompletionChunk]:
         kwargs = self._build_kwargs(request)
         completion_id = f"chatcmpl-{uuid.uuid4().hex}"
         model = request.model
@@ -189,9 +183,7 @@ class AnthropicProvider(LLMProvider):
                                 choices=[
                                     StreamChoice(
                                         index=0,
-                                        delta=ChoiceDelta(
-                                            role="assistant", content=delta_text
-                                        ),
+                                        delta=ChoiceDelta(role="assistant", content=delta_text),
                                         finish_reason=None,
                                     )
                                 ],
@@ -221,11 +213,8 @@ class AnthropicProvider(LLMProvider):
                 provider=self.name,
             ) from exc
 
-    async def list_models(self) -> List[ModelObject]:
-        return [
-            ModelObject(id=model_id, owned_by="anthropic")
-            for model_id in ANTHROPIC_MODELS
-        ]
+    async def list_models(self) -> list[ModelObject]:
+        return [ModelObject(id=model_id, owned_by="anthropic") for model_id in ANTHROPIC_MODELS]
 
     async def health_check(self) -> HealthStatus:
         start = time.monotonic()
@@ -238,7 +227,9 @@ class AnthropicProvider(LLMProvider):
             )
             latency_ms = (time.monotonic() - start) * 1000
             return HealthStatus(provider=self.name, healthy=True, latency_ms=latency_ms)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - a health check must report
+            # unhealthy for ANY failure mode, not just the ones we anticipated;
+            # narrowing this would risk the health check itself crashing.
             latency_ms = (time.monotonic() - start) * 1000
             return HealthStatus(
                 provider=self.name, healthy=False, latency_ms=latency_ms, error=str(exc)

@@ -187,16 +187,16 @@ class TestUsageInfo:
 
 class TestChatCompletionResponse:
     def _make_response(self, **kwargs):
-        defaults = dict(
-            model="claude-haiku-4-5",
-            choices=[
+        defaults = {
+            "model": "claude-haiku-4-5",
+            "choices": [
                 Choice(
                     index=0,
                     message=ChoiceMessage(role="assistant", content="Hi"),
                     finish_reason="stop",
                 )
             ],
-        )
+        }
         defaults.update(kwargs)
         return ChatCompletionResponse(**defaults)
 

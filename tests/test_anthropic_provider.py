@@ -2,29 +2,30 @@
 
 from __future__ import annotations
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.providers.anthropic import AnthropicProvider, _convert_messages, ANTHROPIC_MODELS
-from src.providers.base import (
-    ProviderAuthError,
-    ProviderError,
-    ProviderRateLimitError,
-    ProviderTimeoutError,
-)
+import pytest
+
 from src.models.schemas import (
     ChatCompletionRequest,
     ChatCompletionResponse,
     ChatMessage,
     MessageRole,
 )
+from src.providers.anthropic import ANTHROPIC_MODELS, AnthropicProvider, _convert_messages
+from src.providers.base import (
+    ProviderAuthError,
+    ProviderError,
+    ProviderRateLimitError,
+    ProviderTimeoutError,
+)
 
 
 def _make_request(**kwargs):
-    defaults = dict(
-        model="claude-3-haiku-20240307",
-        messages=[{"role": "user", "content": "Hello"}],
-    )
+    defaults = {
+        "model": "claude-3-haiku-20240307",
+        "messages": [{"role": "user", "content": "Hello"}],
+    }
     defaults.update(kwargs)
     return ChatCompletionRequest(**defaults)
 
@@ -43,9 +44,8 @@ def _make_mock_anthropic_response(text="Hello from Claude", input_tokens=10, out
 
 class TestAnthropicProviderInit:
     def test_raises_auth_error_when_no_key(self):
-        with patch.dict("os.environ", {}, clear=True):
-            with pytest.raises(ProviderAuthError):
-                AnthropicProvider(api_key=None)
+        with patch.dict("os.environ", {}, clear=True), pytest.raises(ProviderAuthError):
+            AnthropicProvider(api_key=None)
 
     def test_accepts_explicit_api_key(self):
         with patch("src.providers.anthropic.anthropic.AsyncAnthropic"):
@@ -53,9 +53,11 @@ class TestAnthropicProviderInit:
         assert provider.api_key == "sk-ant-test"
 
     def test_accepts_key_from_env(self):
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "env-key"}):
-            with patch("src.providers.anthropic.anthropic.AsyncAnthropic"):
-                provider = AnthropicProvider()
+        with (
+            patch.dict("os.environ", {"ANTHROPIC_API_KEY": "env-key"}),
+            patch("src.providers.anthropic.anthropic.AsyncAnthropic"),
+        ):
+            provider = AnthropicProvider()
         assert provider.api_key == "env-key"
 
     def test_provider_name_is_anthropic(self):
@@ -174,6 +176,7 @@ class TestAnthropicProviderComplete:
     @pytest.mark.asyncio
     async def test_complete_raises_provider_auth_error_on_auth_failure(self):
         import anthropic
+
         mock_client = AsyncMock()
         mock_client.messages.create = AsyncMock(
             side_effect=anthropic.AuthenticationError(
@@ -193,6 +196,7 @@ class TestAnthropicProviderComplete:
     @pytest.mark.asyncio
     async def test_complete_raises_provider_rate_limit_error(self):
         import anthropic
+
         mock_client = AsyncMock()
         mock_client.messages.create = AsyncMock(
             side_effect=anthropic.RateLimitError(
@@ -212,6 +216,7 @@ class TestAnthropicProviderComplete:
     @pytest.mark.asyncio
     async def test_complete_raises_provider_timeout_error(self):
         import anthropic
+
         mock_client = AsyncMock()
         mock_client.messages.create = AsyncMock(
             side_effect=anthropic.APITimeoutError(request=MagicMock())
