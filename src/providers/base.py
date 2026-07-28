@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import time
 from abc import ABC, abstractmethod
-from typing import AsyncIterator, List, Optional
+from collections.abc import AsyncIterator
 
 from src.models.schemas import (
+    ChatCompletionChunk,
     ChatCompletionRequest,
     ChatCompletionResponse,
-    ChatCompletionChunk,
     HealthStatus,
     ModelObject,
 )
@@ -30,7 +30,7 @@ class ProviderRateLimitError(ProviderError):
     def __init__(
         self,
         message: str,
-        retry_after: Optional[float] = None,
+        retry_after: float | None = None,
         provider: str = "unknown",
     ):
         super().__init__(message, status_code=429, provider=provider)
@@ -63,7 +63,7 @@ class LLMProvider(ABC):
 
     name: str = "base"
 
-    def __init__(self, api_key: Optional[str] = None, timeout: float = 60.0):
+    def __init__(self, api_key: str | None = None, timeout: float = 60.0):
         self.api_key = api_key
         self.timeout = timeout
         self._healthy: bool = True
@@ -83,7 +83,7 @@ class LLMProvider(ABC):
         ...
 
     @abstractmethod
-    async def list_models(self) -> List[ModelObject]:
+    async def list_models(self) -> list[ModelObject]:
         """Return the list of models available from this provider."""
         ...
 
