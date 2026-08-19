@@ -8,7 +8,7 @@
 [![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker)](docker-compose.yml)
-[![Tests](https://img.shields.io/badge/tests-316%20passing-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-323%20passing-brightgreen)](tests/)
 [![Coverage](https://img.shields.io/badge/coverage-99%25-brightgreen)](tests/)
 
 **A single OpenAI-compatible endpoint in front of Anthropic, OpenAI, and local Ollama models — with Redis-backed caching, sliding-window rate limiting, deterministic A/B routing, and per-key cost tracking.**
@@ -51,9 +51,9 @@ The gateway is deliberately small and composable. Each concern is an isolated mo
 
 - **Provider abstraction (`src/providers/`).** `LLMProvider` is an `ABC` defining `complete()`, `stream()`, `list_models()`, and `health_check()`. Concrete providers (`AnthropicProvider`, `OpenAIProvider`, `OllamaProvider`) translate the OpenAI-style request/response into each vendor's native format — including system-prompt extraction, tool-call mapping, and the user/assistant alternation Anthropic requires. Upstream failures are normalized into a typed error hierarchy (`ProviderAuthError` → 401, `ProviderRateLimitError` → 429, `ProviderTimeoutError` → 504) so callers see consistent status codes regardless of vendor.
 
-- **Routing (`src/gateway/router.py`).** `GatewayRouter` selects a provider by model-name prefix: `ollama/*` → a local Ollama instance (`OLLAMA_BASE_URL`, default `http://localhost:11434`), `gpt*`/`o1*` → OpenAI, otherwise Anthropic. The `ollama/` namespace is explicit (same convention LiteLLM and other multi-provider gateways use) so an unrecognized model name still falls back to Anthropic rather than silently trying a local Ollama instance that may not be running. The OpenAI and Ollama clients are both lazily constructed so an Anthropic-only deployment never needs an OpenAI key or a running Ollama instance.
+- **Routing (`src/gateway/router.py`).** `GatewayRouter` selects a provider by model-name prefix: `ollama/*` → a local Ollama instance (`OLLAMA_BASE_URL`, default `http://localhost:11434`), `gpt*`/`o1*` → OpenAI, otherwise Anthropic. The `ollama/` namespace is explicit (same convention LiteLLM and other multi-provider gateways use) so an unrecognized model name still falls back to Anthropic rather than silently trying a local Ollama instance that may not be running. The OpenAI and Ollama clients are both lazily constructed so an Anthropic-only deployment never needs an OpenAI key or a running Ollama instance. All three providers (`AnthropicProvider`, `OpenAIAsyncProvider`, `OllamaProvider`) implement the same async `LLMProvider.complete(request: ChatCompletionRequest)` contract, and `/v1/chat/completions` awaits it directly — there is a single OpenAI provider implementation (`src/providers/openai.py`); the older, incompatible synchronous one has been removed.
 
-  **Known limitation, not yet fixed:** `src/providers/openai_provider.py` (the older, synchronous provider the router currently imports) has a different `complete()` signature than `AnthropicProvider`/`OllamaProvider`/the newer unused `src/providers/openai.py` (all three implement the shared async `LLMProvider.complete(request: ChatCompletionRequest)` contract). The live `/v1/chat/completions` endpoint's calling convention (`provider.complete(req.messages, model=req.model, ...)`) only actually matches the old `openai_provider.py` shape — routing a Claude or Ollama model through the real HTTP endpoint would hit this mismatch. This was found while wiring in Ollama routing; fixing it properly means either migrating the router to the newer `openai.py` and updating the endpoint to the async `ChatCompletionRequest` contract, or reconciling the two OpenAI provider files — a small but real refactor, tracked here rather than silently left undocumented.
+- **Auth and rate limiting (`src/api/deps.py`).** Every request to `/v1/chat/completions` and `/v1/experiments/*` requires a valid `X-API-Key` header, checked against `API_KEYS` (comma-separated). A valid key is then passed through the sliding-window `RateLimiter`; requests over the configured quota get `429`.
 
 - **Deterministic A/B testing (`src/gateway/ab_router.py`).** Assignment is `MD5(experiment_id + user_id) % 100`, walked against cumulative `traffic_pct` buckets. Because it's a pure hash of stable inputs, the same user always lands in the same variant across requests and restarts — no assignment state to store or sync.
 
@@ -91,7 +91,7 @@ Local development without Docker:
 ```bash
 pip install -e ".[dev]"
 uvicorn src.api.main:app --reload --port 8000
-pytest                    # 312 tests across 17 suites
+pytest                    # 323 tests across 16 suites
 ruff check . && mypy src  # lint + type-check
 ```
 
@@ -99,7 +99,7 @@ Configuration is environment-driven (`.env`): `ANTHROPIC_API_KEY`, `OPENAI_API_K
 
 ## Testing
 
-The suite has **316 test functions across 17 files** (`tests/`), covering the provider adapters (including Anthropic message conversion and streaming, and the `ollama/*` routing prefix), the A/B router's bucketing math, the sliding-window limiter, cache hit/miss paths, usage/cost aggregation, and the API endpoints. Line coverage on `src/` is currently 99% (`pytest --cov=src --cov-report=term-missing`).
+The suite has **323 test functions across 16 files** (`tests/`), covering the provider adapters (including Anthropic message conversion and streaming, and the `ollama/*` routing prefix), the A/B router's bucketing math, the sliding-window limiter, cache hit/miss paths, usage/cost aggregation, and the API endpoints — including an integration test that exercises the real, unmocked `AnthropicProvider.complete()` coroutine through the live route (stubbing only the outermost Anthropic SDK call), so a regression to a synchronous provider-calling convention fails loudly instead of being masked by an over-permissive mock. Line coverage on `src/` is currently 99% (`pytest --cov=src --cov-report=term-missing`).
 
 ## Deployment
 
@@ -114,13 +114,13 @@ The suite has **316 test functions across 17 files** (`tests/`), covering the pr
 
 Interactive docs: `http://localhost:8000/docs` (Swagger UI) · `http://localhost:8000/redoc` (ReDoc)
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/health` | Health check — returns service version |
-| `POST` | `/v1/chat/completions` | OpenAI-compatible chat completions (routes to Anthropic, OpenAI, or Ollama) |
-| `GET` | `/v1/experiments` | List all A/B experiments |
-| `POST` | `/v1/experiments` | Create a new A/B experiment |
-| `GET` | `/v1/experiments/{experiment_id}/assignment` | Get model assignment for a user |
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `GET` | `/health` | — | Health check — returns service version |
+| `POST` | `/v1/chat/completions` | `X-API-Key` | OpenAI-compatible chat completions (routes to Anthropic, OpenAI, or Ollama) |
+| `GET` | `/v1/experiments` | `X-API-Key` | List all A/B experiments |
+| `POST` | `/v1/experiments` | `X-API-Key` | Create a new A/B experiment |
+| `GET` | `/v1/experiments/{experiment_id}/assignment` | `X-API-Key` | Get model assignment for a user |
 
 ## Tech stack
 

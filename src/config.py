@@ -1,3 +1,5 @@
+from functools import cached_property
+
 from pydantic_settings import BaseSettings
 
 
@@ -15,6 +17,11 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
+
+    @cached_property
+    def parsed_api_keys(self) -> set[str]:
+        """Comma-separated api_keys config, parsed into a lookup set."""
+        return {key.strip() for key in self.api_keys.split(",") if key.strip()}
 
 
 settings = Settings()
