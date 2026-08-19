@@ -1,8 +1,9 @@
 """A/B experiment endpoints."""
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from src.api.deps import require_api_key
 from src.gateway.ab_router import ABRouter, Experiment
 
 router = APIRouter(prefix="/v1/experiments", tags=["experiments"])
@@ -15,21 +16,23 @@ class ExperimentCreate(BaseModel):
 
 
 @router.get("")
-def list_experiments():
+def list_experiments(api_key: str = Depends(require_api_key)):
     return {
         "experiments": [{"id": e.id, "variants": e.variants} for e in _ab_router.list_experiments()]
     }
 
 
 @router.post("")
-def create_experiment(req: ExperimentCreate):
+def create_experiment(req: ExperimentCreate, api_key: str = Depends(require_api_key)):
     exp = Experiment(id=req.id, variants=req.variants)
     _ab_router.add_experiment(exp)
     return {"id": exp.id, "variants": exp.variants}
 
 
 @router.get("/{experiment_id}/assignment")
-def get_assignment(experiment_id: str, user_id: str = "default"):
+def get_assignment(
+    experiment_id: str, user_id: str = "default", api_key: str = Depends(require_api_key)
+):
     try:
         model = _ab_router.get_assignment(experiment_id, user_id)
         return {"experiment_id": experiment_id, "user_id": user_id, "model": model}

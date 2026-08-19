@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with: {python-version: "3.11"}
-      - run: pip install bandit && bandit -r src/ -ll || true
+      - run: pip install bandit && bandit -r src/ -ll
 
   docker-build:
     runs-on: ubuntu-latest

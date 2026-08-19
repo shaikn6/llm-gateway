@@ -4,7 +4,6 @@ Covers uncovered branches in:
 - src/providers/anthropic.py  (stream, _convert_messages tool/tool_calls, APIError, _build_kwargs full branches)
 - src/providers/openai.py     (stream, APIError path)
 - src/providers/ollama.py     (stream, empty content, raise_for_status branch)
-- src/providers/openai_provider.py (sync complete)
 - src/providers/base.py       (is_healthy cache-hit path, health_check_interval)
 - src/gateway/router.py       (get_router singleton, openai provider import branch)
 - src/api/main.py             (get_router singleton, health endpoint extras)
@@ -952,63 +951,6 @@ class TestOllamaProviderStream:
 
 
 # ---------------------------------------------------------------------------
-# src/providers/openai_provider.py — sync OpenAIProvider.complete
-# ---------------------------------------------------------------------------
-
-
-class TestOpenAIProviderSync:
-    def test_complete_returns_dict_with_expected_keys(self):
-        """The lightweight sync OpenAIProvider used by GatewayRouter."""
-        mock_resp = MagicMock()
-        mock_resp.id = "chatcmpl-sync-1"
-        mock_resp.model = "gpt-4o-mini"
-        choice = MagicMock()
-        choice.message.content = "Sync response"
-        mock_resp.choices = [choice]
-        mock_resp.usage = MagicMock(prompt_tokens=5, completion_tokens=3)
-
-        mock_openai_client = MagicMock()
-        mock_openai_client.chat.completions.create.return_value = mock_resp
-
-        with patch("src.providers.openai_provider.openai.OpenAI", return_value=mock_openai_client):
-            from src.providers.openai_provider import OpenAIProvider
-            provider = OpenAIProvider(api_key="sk-test")
-
-        result = provider.complete(
-            messages=[{"role": "user", "content": "Hello"}],
-            model="gpt-4o-mini",
-        )
-        assert result["id"] == "chatcmpl-sync-1"
-        assert result["model"] == "gpt-4o-mini"
-        assert result["choices"][0]["message"]["content"] == "Sync response"
-        assert "prompt_tokens" in result["usage"]
-
-    def test_complete_passes_kwargs_to_create(self):
-        mock_resp = MagicMock()
-        mock_resp.id = "id"
-        mock_resp.model = "gpt-4o-mini"
-        choice = MagicMock()
-        choice.message.content = "ok"
-        mock_resp.choices = [choice]
-        mock_resp.usage = MagicMock(prompt_tokens=1, completion_tokens=1)
-
-        mock_openai_client = MagicMock()
-        mock_openai_client.chat.completions.create.return_value = mock_resp
-
-        with patch("src.providers.openai_provider.openai.OpenAI", return_value=mock_openai_client):
-            from src.providers.openai_provider import OpenAIProvider
-            provider = OpenAIProvider(api_key="sk-test")
-
-        provider.complete(
-            messages=[{"role": "user", "content": "test"}],
-            model="gpt-4o-mini",
-            max_tokens=100,
-        )
-        call_kwargs = mock_openai_client.chat.completions.create.call_args[1]
-        assert call_kwargs["max_tokens"] == 100
-
-
-# ---------------------------------------------------------------------------
 # src/gateway/router.py — GatewayRouter and get_router
 # ---------------------------------------------------------------------------
 
@@ -1019,24 +961,22 @@ class TestGetRouterSingleton:
         import src.api.main as main_module
         from src.gateway.router import GatewayRouter
 
-        original = main_module._gateway
+        main_module.get_router.cache_clear()
         try:
-            main_module._gateway = None
             with patch.object(main_module, "settings") as mock_settings:
                 mock_settings.anthropic_api_key = "sk-ant-test"
                 mock_settings.openai_api_key = "sk-openai-test"
                 result = main_module.get_router()
             assert isinstance(result, GatewayRouter)
         finally:
-            main_module._gateway = original
+            main_module.get_router.cache_clear()
 
     def test_get_router_returns_same_instance_on_second_call(self):
         """Singleton: second call returns same object."""
         import src.api.main as main_module
 
-        original = main_module._gateway
+        main_module.get_router.cache_clear()
         try:
-            main_module._gateway = None
             with patch.object(main_module, "settings") as mock_settings:
                 mock_settings.anthropic_api_key = "sk-ant-test"
                 mock_settings.openai_api_key = "sk-openai-test"
@@ -1044,7 +984,7 @@ class TestGetRouterSingleton:
                 r2 = main_module.get_router()
             assert r1 is r2
         finally:
-            main_module._gateway = original
+            main_module.get_router.cache_clear()
 
     def test_health_endpoint_returns_version(self):
         from fastapi.testclient import TestClient

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from src.providers.anthropic import AnthropicProvider
 from src.providers.ollama import OLLAMA_DEFAULT_URL, OllamaProvider
-from src.providers.openai_provider import OpenAIProvider
+from src.providers.openai import OpenAIAsyncProvider as OpenAIProvider
 
 
 class GatewayRouter:

@@ -23,7 +23,12 @@ class ABRouter:
         exp = self._experiments.get(experiment_id)
         if not exp:
             raise ValueError(f"Experiment {experiment_id!r} not found")
-        bucket = int(hashlib.md5(f"{experiment_id}{user_id}".encode()).hexdigest(), 16) % 100
+        # usedforsecurity=False: MD5 here is only for deterministic traffic
+        # bucketing, not a security boundary.
+        digest = hashlib.md5(
+            f"{experiment_id}{user_id}".encode(), usedforsecurity=False
+        ).hexdigest()
+        bucket = int(digest, 16) % 100
         cumulative = 0
         for variant in exp.variants:
             cumulative += variant["traffic_pct"]
