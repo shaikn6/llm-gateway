@@ -43,7 +43,7 @@ flowchart TD
     RateLimit -. 429 .-> Client
 ```
 
-All Redis-backed components (cache, rate limiter, usage tracker) share one Redis instance and degrade independently — a cache miss or limiter error never blocks a completion.
+All Redis-backed components (cache, rate limiter, usage tracker) share one Redis instance. Usage tracking runs as a post-response background task, so it can't block or fail a completion. Cache and rate-limit checks, by contrast, run inline and are not currently wrapped in a fallback — a Redis outage surfaces as a `500` on `/v1/chat/completions` rather than degrading to "skip cache" or "skip limiting." Graceful degradation there is a known gap, not yet shipped behavior.
 
 ## How it works
 
