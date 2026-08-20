@@ -92,7 +92,7 @@ Local development without Docker:
 pip install -e ".[dev]"
 uvicorn src.api.main:app --reload --port 8000
 pytest                    # 323 tests across 16 suites
-ruff check . && mypy src  # lint + type-check
+ruff check .              # lint (CI-gated; mypy is unpinned/advisory, not yet CI-gated)
 ```
 
 Configuration is environment-driven (`.env`): `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OLLAMA_BASE_URL` (default `http://localhost:11434`), `REDIS_URL`, `CACHE_ENABLED`, `API_KEYS` (comma-separated), `LOG_LEVEL`.
