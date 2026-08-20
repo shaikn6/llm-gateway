@@ -122,6 +122,17 @@ Interactive docs: `http://localhost:8000/docs` (Swagger UI) · `http://localhost
 | `POST` | `/v1/experiments` | `X-API-Key` | Create a new A/B experiment |
 | `GET` | `/v1/experiments/{experiment_id}/assignment` | `X-API-Key` | Get model assignment for a user |
 
+Auth is enforced on every protected route — a request with a missing or unrecognized `X-API-Key` is rejected before it reaches the router, cache, or rate limiter:
+
+```bash
+$ curl -s -w '\nHTTP %{http_code}\n' http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model": "claude-haiku-4-5", "messages": [{"role": "user", "content": "Hello"}]}'
+
+{"detail":"Invalid or missing X-API-Key"}
+HTTP 401
+```
+
 ## Tech stack
 
 Python 3.11 · FastAPI · Pydantic v2 · Redis (cache / rate limiter / usage) · `anthropic` & `openai` SDKs · Uvicorn · pytest · ruff · mypy · Docker · Helm / Kubernetes.
