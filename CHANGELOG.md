@@ -6,11 +6,11 @@ All notable changes to this project are documented here.
 
 ### Added
 - OpenAI-compatible REST API gateway with drop-in replacement support for existing SDK clients
-- Semantic caching layer using sentence-transformers to deduplicate near-identical prompts and cut costs
-- Intelligent request routing across Claude, OpenAI, and Ollama backends based on latency and cost policy
-- Per-model cost analytics dashboard with daily/weekly spend breakdowns and token-level attribution
-- Rate limiting and quota enforcement per API key with configurable burst and sustained limits
-- Docker Compose deployment with Redis cache backend and Prometheus metrics endpoint
+- Redis-backed response cache keyed on a SHA-256 hash of the request payload, to avoid re-billing identical repeated requests
+- Request routing across Claude, OpenAI, and Ollama backends
+- Per-key rate limiting via a Redis sliding-window limiter
+- Per-key usage tracking recorded as a background task after each response
+- Docker Compose deployment with a Redis cache/rate-limit backend
 
 ### Changed
 - Production-ready CI/CD with 95%+ test coverage enforcement
