@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here.
 
+## [Unreleased]
+
+### Added
+- Structured JSON audit logging middleware (`src/middleware/audit.py`) — one
+  metadata-only record per request (request id, method, path, status, latency,
+  client IP, API-key fingerprint); prompt and completion content are never logged
+- `Security` section in the README (threat model, encryption posture, audit
+  logging, not-yet-covered gaps)
+
 ## [1.0.0] - 2026-06-16
 
 ### Added

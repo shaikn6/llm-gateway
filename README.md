@@ -55,6 +55,8 @@ The gateway is deliberately small and composable. Each concern is an isolated mo
 
 - **Auth and rate limiting (`src/api/deps.py`).** Every request to `/v1/chat/completions` and `/v1/experiments/*` requires a valid `X-API-Key` header, checked against `API_KEYS` (comma-separated). A valid key is then passed through the sliding-window `RateLimiter`; requests over the configured quota get `429`.
 
+- **Audit logging (`src/middleware/audit.py`).** `AuditMiddleware` emits one structured JSON line per request — `request_id` (reused from an inbound `X-Request-Id` or generated), method, path, status, latency, client IP, and a SHA-256 fingerprint of the API key. Prompt and completion content are never logged, at any level. `configure_logging()` routes the root logger through a single JSON handler on stdout, ready for Loki / CloudWatch without a parser.
+
 - **Deterministic A/B testing (`src/gateway/ab_router.py`).** Assignment is `MD5(experiment_id + user_id) % 100`, walked against cumulative `traffic_pct` buckets. Because it's a pure hash of stable inputs, the same user always lands in the same variant across requests and restarts — no assignment state to store or sync.
 
 - **Response caching (`src/cache/semantic_cache.py`).** Cache keys are `SHA-256` of the canonicalized (`sort_keys`) message list, stored in Redis with a configurable TTL. Identical prompts return instantly and skip the provider call entirely.
@@ -72,6 +74,7 @@ The gateway is deliberately small and composable. Each concern is an isolated mo
 | Redis sorted-set rate limiter | Real sliding window (not fixed buckets), single pipelined round trip per check. |
 | Typed provider error hierarchy | Vendor errors are distinguishable in code by type, each pre-annotated with the status code it should surface as; wiring that into the API's error response is the next step. |
 | Multi-stage Dockerfile, non-root user | Smaller production image, no build toolchain or root in the runtime layer. |
+| Metadata-only audit log (JSON, one line/request) | Full request accounting for operators without ever persisting prompt or completion content — the sensitive surface for an LLM gateway. |
 
 ## Quick Start
 
@@ -91,7 +94,7 @@ Local development without Docker:
 ```bash
 pip install -e ".[dev]"
 uvicorn src.api.main:app --reload --port 8000
-pytest                    # 323 tests across 16 suites
+pytest                    # 328 tests across 17 suites
 ruff check .              # lint (CI-gated; mypy is unpinned/advisory, not yet CI-gated)
 ```
 
@@ -99,7 +102,7 @@ Configuration is environment-driven (`.env`): `ANTHROPIC_API_KEY`, `OPENAI_API_K
 
 ## Testing
 
-The suite has **323 test functions across 16 files** (`tests/`), covering the provider adapters (including Anthropic message conversion and streaming, and the `ollama/*` routing prefix), the A/B router's bucketing math, the sliding-window limiter, cache hit/miss paths, usage/cost aggregation, and the API endpoints — including an integration test that exercises the real, unmocked `AnthropicProvider.complete()` coroutine through the live route (stubbing only the outermost Anthropic SDK call), so a regression to a synchronous provider-calling convention fails loudly instead of being masked by an over-permissive mock. Line coverage on `src/` is currently 99% (`pytest --cov=src --cov-report=term-missing`).
+The suite has **328 test functions across 17 files** (`tests/`), covering the provider adapters (including Anthropic message conversion and streaming, and the `ollama/*` routing prefix), the A/B router's bucketing math, the sliding-window limiter, cache hit/miss paths, usage/cost aggregation, the audit-log middleware (JSON shape, inbound request-id reuse, key fingerprint not raw key, no prompt content in any record), and the API endpoints — including an integration test that exercises the real, unmocked `AnthropicProvider.complete()` coroutine through the live route (stubbing only the outermost Anthropic SDK call), so a regression to a synchronous provider-calling convention fails loudly instead of being masked by an over-permissive mock. Line coverage on `src/` is currently 99% (`pytest --cov=src --cov-report=term-missing`).
 
 ## Deployment
 
@@ -132,6 +135,74 @@ $ curl -s -w '\nHTTP %{http_code}\n' http://localhost:8000/v1/chat/completions \
 {"detail":"Invalid or missing X-API-Key"}
 HTTP 401
 ```
+
+## Security
+
+An LLM gateway is a high-value target: it holds provider API keys, brokers every
+prompt and completion in the system, and is where per-caller cost and rate
+controls actually live. This section states what the gateway enforces, what it
+deliberately delegates, and what is not yet covered.
+
+### Threat model
+
+| Asset | Threat | Control in this repo |
+|-------|--------|----------------------|
+| Provider API keys (Anthropic / OpenAI) | Leak via source, image layers, or logs | Keys only via env / `.env` (git-ignored) or a mounted `Secret`; never request/response-logged; multi-stage Docker build keeps them out of image layers |
+| `/v1/chat/completions` and `/v1/experiments/*` | Unauthenticated use → provider-cost abuse | `X-API-Key` checked against the `API_KEYS` allowlist in `require_api_key` (`src/api/deps.py`); missing/unknown → `401` *before* the router, cache, or rate limiter is touched |
+| The gateway as a whole | Volumetric abuse / DoS from one caller | Redis sliding-window rate limiter (`src/middleware/rate_limiter.py`), keyed per API key, single pipelined round trip; over quota → `429` |
+| Prompt / completion content | Exposure through operational logging | `AuditMiddleware` records request metadata only — prompt and completion bodies are never written, at any log level (`tests/test_audit.py` asserts a known secret in a request body never appears in any emitted record) |
+| Cost attribution | One caller's spend attributed to another | Usage tracked per API key (`src/middleware/usage_tracker.py`); audit log ties each request to a key fingerprint |
+| Container runtime | Privilege escalation from a compromised process | Dockerfile runs as a non-root user with no build toolchain in the runtime layer |
+| Dependencies | Known-vuln transitive packages | Exact-pinned `ruff`, CI lint gate, Dependabot on the repo |
+
+### Encryption
+
+| Path | Posture |
+|------|---------|
+| Client → gateway | TLS terminated at the ingress / load balancer (`helm/llm-gateway/` ingress). The app speaks plain HTTP only on the pod network and is never exposed directly. |
+| Gateway → providers | HTTPS enforced by the `anthropic` / `openai` SDKs (TLS 1.2+). |
+| Gateway → Redis | `REDIS_URL` accepts `rediss://` (TLS); use in-transit encryption plus an ACL / `requirepass` for any non-loopback Redis. |
+| At rest | The gateway is stateless. Redis holds only cache entries, rate-limit counters, and usage counters — no prompt content; if persistence is enabled it should sit on an encrypted volume. Kubernetes `Secret`s should be backed by KMS-encrypted etcd or an external secrets store. |
+
+### Audit logging
+
+`AuditMiddleware` (`src/middleware/audit.py`) emits exactly one structured JSON
+line per request:
+
+```json
+{"ts":"2026-08-27T20:08:33-0400","level":"INFO","logger":"llm_gateway.audit",
+ "msg":"request","request_id":"1576c79e-…","method":"POST",
+ "path":"/v1/chat/completions","status":200,"latency_ms":0.6,
+ "client":"10.0.1.7","api_key":"1bcefe2243ec"}
+```
+
+- **Correlatable** — `request_id` comes from an inbound `X-Request-Id` or is
+  generated, so a gateway record joins to upstream and downstream traces.
+- **Attributable, not sensitive** — `api_key` is a SHA-256 fingerprint (first 12
+  hex chars), never the raw key.
+- **Content-free** — method, path, status, latency, caller only. Prompt and
+  completion text are never logged.
+- **Shippable** — single-line JSON on stdout via `configure_logging()`, ready for
+  Loki / CloudWatch / Elastic without a parser.
+
+### Not yet covered
+
+Tracked here rather than left implicit:
+
+- **Key management** — API keys are a static env allowlist: no per-key scopes,
+  rotation, expiry, or revocation without a redeploy. A real deployment should
+  front this with an API gateway / IdP issuing short-lived credentials.
+- **Hard per-key quotas** — usage is *measured* per key but not *enforced* as a
+  spend cap; the rate limiter is the only guardrail today.
+- **Provider error differentiation** — the typed error hierarchy exists but
+  `/v1/chat/completions` still returns a generic `500` for provider failures
+  (see *How it works*).
+- **PII redaction** — the gateway does not inspect or scrub prompt content.
+
+### Reporting a vulnerability
+
+See [`SECURITY.md`](SECURITY.md). Report privately to **nagizaazs@gmail.com** —
+do not open a public issue.
 
 ## Tech stack
 

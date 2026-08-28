@@ -11,9 +11,13 @@ from src.api.routes.experiments import router as experiments_router
 from src.cache.semantic_cache import SemanticCache
 from src.config import settings
 from src.gateway.router import GatewayRouter
+from src.middleware.audit import AuditMiddleware, configure_logging
 from src.middleware.usage_tracker import UsageTracker
 
+configure_logging()
+
 app = FastAPI(title="LLM Gateway", version="0.1.0")
+app.add_middleware(AuditMiddleware)
 app.include_router(completions_router)
 app.include_router(experiments_router)
 
