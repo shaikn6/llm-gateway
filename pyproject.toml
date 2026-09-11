@@ -19,7 +19,7 @@ dev = [
     "pytest-cov>=5.0",
     "pytest-asyncio>=0.23",
     "pytest-mock>=3.14",
-    "ruff==0.16.3",
+    "ruff==0.16.6",
     "mypy>=1.10",
 ]
 
