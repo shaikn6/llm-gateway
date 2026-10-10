@@ -6,6 +6,7 @@ from functools import lru_cache
 
 from fastapi import FastAPI
 
+from src import __version__
 from src.api.routes.completions import router as completions_router
 from src.api.routes.experiments import router as experiments_router
 from src.cache.semantic_cache import SemanticCache
@@ -16,7 +17,7 @@ from src.middleware.usage_tracker import UsageTracker
 
 configure_logging()
 
-app = FastAPI(title="LLM Gateway", version="0.1.0")
+app = FastAPI(title="LLM Gateway", version=__version__)
 app.add_middleware(AuditMiddleware)
 app.include_router(completions_router)
 app.include_router(experiments_router)
@@ -42,4 +43,4 @@ def get_usage_tracker() -> UsageTracker:
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "0.1.0"}
+    return {"status": "ok", "version": __version__}

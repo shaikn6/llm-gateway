@@ -1,7 +1,11 @@
-"""A/B experiment endpoints."""
+"""A/B experiment endpoints.
+
+Experiments are held in process memory: they are lost on restart and are not
+shared between workers or replicas.
+"""
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 from src.api.deps import require_api_key
 from src.gateway.ab_router import ABRouter, Experiment
@@ -10,9 +14,21 @@ router = APIRouter(prefix="/v1/experiments", tags=["experiments"])
 _ab_router = ABRouter()
 
 
+class Variant(BaseModel):
+    model: str
+    traffic_pct: int = Field(ge=0, le=100)
+
+
 class ExperimentCreate(BaseModel):
     id: str
-    variants: list[dict]
+    variants: list[Variant] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def weights_sum_to_100(self) -> "ExperimentCreate":
+        total = sum(v.traffic_pct for v in self.variants)
+        if total != 100:
+            raise ValueError(f"variant traffic_pct values must sum to 100, got {total}")
+        return self
 
 
 @router.get("")
@@ -24,7 +40,7 @@ def list_experiments(api_key: str = Depends(require_api_key)):
 
 @router.post("")
 def create_experiment(req: ExperimentCreate, api_key: str = Depends(require_api_key)):
-    exp = Experiment(id=req.id, variants=req.variants)
+    exp = Experiment(id=req.id, variants=[v.model_dump() for v in req.variants])
     _ab_router.add_experiment(exp)
     return {"id": exp.id, "variants": exp.variants}
 

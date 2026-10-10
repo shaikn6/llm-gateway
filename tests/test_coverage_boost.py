@@ -22,6 +22,8 @@ from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 
+from src.middleware.audit import key_fingerprint
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -661,7 +663,8 @@ class TestAnthropicBuildKwargs:
         req = _make_request(top_p=0.9)
         await provider.complete(req)
         kwargs = mock_client.messages.create.call_args[1]
-        assert kwargs["top_p"] == 0.9
+        assert kwargs["extra_body"] == {"top_p": 0.9}
+        assert "top_p" not in kwargs
 
     @pytest.mark.asyncio
     async def test_temperature_is_passed_when_set(self):
@@ -686,7 +689,8 @@ class TestAnthropicBuildKwargs:
         req = _make_request(temperature=0.3)
         await provider.complete(req)
         kwargs = mock_client.messages.create.call_args[1]
-        assert kwargs["temperature"] == 0.3
+        assert kwargs["extra_body"] == {"temperature": 0.3}
+        assert "temperature" not in kwargs
 
     @pytest.mark.asyncio
     async def test_complete_raises_api_error(self):
@@ -993,7 +997,7 @@ class TestGetRouterSingleton:
 
         client = TestClient(app)
         resp = client.get("/health")
-        assert resp.json()["version"] == "0.1.0"
+        assert resp.json()["version"] == "1.1.0"
 
 
 # ---------------------------------------------------------------------------
@@ -1146,12 +1150,12 @@ class TestRateLimiterEdgeCases:
 
         rl.check("key")
         args = pipe.zremrangebyscore.call_args[0]
-        assert args[0] == "ratelimit:key"
+        assert args[0] == f"ratelimit:{key_fingerprint('key')}"
 
     def test_record_expire_uses_double_window(self):
         rl, mock_redis = self._make_limiter(window_s=30)
         rl.record("mykey")
-        mock_redis.expire.assert_called_once_with("ratelimit:mykey", 60)  # 30 * 2
+        mock_redis.expire.assert_called_once_with(f"ratelimit:{key_fingerprint('mykey')}", 60)  # 30 * 2
 
     def test_check_pipeline_executes(self):
         rl, mock_redis = self._make_limiter()
@@ -1179,7 +1183,7 @@ class TestSemanticCacheAdditional:
     def test_get_with_empty_messages_list(self):
         sc, mock_redis = self._make_cache()
         mock_redis.get.return_value = None
-        result = sc.get([])
+        result = sc.get([], tenant="key-a")
         assert result is None
 
     def test_set_with_complex_nested_response(self):
@@ -1190,7 +1194,7 @@ class TestSemanticCacheAdditional:
             "choices": [{"message": {"role": "assistant", "content": "yes"}}],
             "usage": {"prompt_tokens": 5, "completion_tokens": 3},
         }
-        sc.set(messages, response)
+        sc.set(messages, response, tenant="key-a")
         stored_json = mock_redis.setex.call_args[0][2]
         assert json.loads(stored_json) == response
 
@@ -1200,19 +1204,19 @@ class TestSemanticCacheAdditional:
             {"role": "user", "content": "hello"},
             {"role": "assistant", "content": "hi"},
         ]
-        key1 = sc._key(messages)
-        key2 = sc._key(messages)
+        key1 = sc._key(messages, tenant="key-a")
+        key2 = sc._key(messages, tenant="key-a")
         assert key1 == key2
 
     def test_get_returns_none_when_redis_returns_none(self):
         sc, mock_redis = self._make_cache()
         mock_redis.get.return_value = None
-        result = sc.get([{"role": "user", "content": "test"}])
+        result = sc.get([{"role": "user", "content": "test"}], tenant="key-a")
         assert result is None
 
     def test_set_serializes_response_as_json(self):
         sc, mock_redis = self._make_cache()
         response = {"key": "value", "nested": {"a": 1}}
-        sc.set([{"role": "user", "content": "q"}], response)
+        sc.set([{"role": "user", "content": "q"}], response, tenant="key-a")
         stored = mock_redis.setex.call_args[0][2]
         assert json.loads(stored) == response

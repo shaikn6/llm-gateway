@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+import redis
 from fastapi import Depends, Header, HTTPException
 
 from src.config import settings
 from src.middleware.rate_limiter import RateLimiter
+
+# Seconds a client is told to wait when the rate limiter's Redis is unreachable.
+RATE_LIMITER_RETRY_AFTER_S = 5
 
 
 @lru_cache(maxsize=1)
@@ -32,10 +36,22 @@ def require_api_key(api_key: str = Depends(get_api_key)) -> str:
     Raises 429 once the caller's quota is exhausted. Returns the validated
     key so route handlers can use it for caching/usage-tracking without
     re-parsing the header.
+
+    Fails closed: if Redis is unreachable the quota cannot be checked, so the
+    request is refused with 503 + Retry-After instead of being let through
+    unmetered.
     """
     limiter = get_rate_limiter()
-    allowed, _remaining = limiter.check(api_key)
+    try:
+        allowed, _remaining = limiter.check(api_key)
+        if allowed:
+            limiter.record(api_key)
+    except redis.RedisError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Rate limiter unavailable",
+            headers={"Retry-After": str(RATE_LIMITER_RETRY_AFTER_S)},
+        ) from exc
     if not allowed:
         raise HTTPException(status_code=429, detail="Rate limit exceeded")
-    limiter.record(api_key)
     return api_key
