@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+import os
+
+# src.config refuses to load without API keys. Set them before anything under
+# src/ is imported; real environment variables also outrank a developer's .env.
+os.environ["API_KEYS"] = "dev-key-1,dev-key-2"
+os.environ.pop("GATEWAY_DEV_MODE", None)
+
 import pytest
 from fastapi.testclient import TestClient
 

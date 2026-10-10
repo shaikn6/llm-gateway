@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 
 import redis
+
+from src.middleware.audit import key_fingerprint
 
 COST_PER_1M = {
     "claude-sonnet-4-6": {"input": 3.0, "output": 15.0},
@@ -13,6 +16,8 @@ COST_PER_1M = {
     "gpt-4o": {"input": 5.0, "output": 15.0},
     "gpt-4o-mini": {"input": 0.15, "output": 0.6},
 }
+
+logger = logging.getLogger(__name__)
 
 
 class UsageTracker:
@@ -28,11 +33,16 @@ class UsageTracker:
                 "ts": time.time(),
             }
         )
-        self._redis.lpush(f"usage:{api_key}", entry)
-        self._redis.expire(f"usage:{api_key}", 86400)
+        try:
+            self._redis.lpush(f"usage:{key_fingerprint(api_key)}", entry)
+            self._redis.expire(f"usage:{key_fingerprint(api_key)}", 86400)
+        except redis.RedisError as exc:
+            # Runs after the response is sent; losing one usage record must not
+            # turn an already-served completion into a server error.
+            logger.warning("usage record dropped (%s)", type(exc).__name__)
 
     def get_usage(self, api_key: str) -> dict:
-        entries = self._redis.lrange(f"usage:{api_key}", 0, -1)
+        entries = self._redis.lrange(f"usage:{key_fingerprint(api_key)}", 0, -1)
         total_input = total_output = total_cost = 0
         by_model: dict = {}
         for e in entries:

@@ -115,10 +115,18 @@ class AnthropicProvider(LLMProvider):
         }
         if system_prompt:
             kwargs["system"] = system_prompt
-        if request.temperature is not None:
-            kwargs["temperature"] = request.temperature
-        if request.top_p is not None:
-            kwargs["top_p"] = request.top_p
+        # anthropic>=1.0 removed temperature/top_p from the messages.create()
+        # and messages.stream() signatures ("current models do not use these
+        # sampling parameters"); the SDK's documented path for a model that
+        # still honours them is extra_body. Forward them only when the caller
+        # set them explicitly, never as schema defaults.
+        sampling = {
+            name: value
+            for name in ("temperature", "top_p")
+            if (value := request.explicit(name)) is not None
+        }
+        if sampling:
+            kwargs["extra_body"] = sampling
         if request.stop:
             kwargs["stop_sequences"] = (
                 [request.stop] if isinstance(request.stop, str) else request.stop

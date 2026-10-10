@@ -92,7 +92,7 @@ class TestHealthEndpoint:
         resp = client.get("/health")
         data = resp.json()
         assert "version" in data
-        assert data["version"] == "0.1.0"
+        assert data["version"] == "1.1.0"
 
 
 # ---------------------------------------------------------------------------
@@ -103,6 +103,7 @@ class TestHealthEndpoint:
 class TestCompletionsEndpoint:
     def test_completions_happy_path(self, client):
         mock_provider = AsyncMock()
+        mock_provider.name = "anthropic"
         mock_provider.complete.return_value = _make_completion_response()
 
         with patch("src.api.main.get_router") as mock_get_router:
@@ -123,6 +124,7 @@ class TestCompletionsEndpoint:
 
     def test_completions_returns_provider_response(self, client):
         mock_provider = AsyncMock()
+        mock_provider.name = "anthropic"
         mock_provider.complete.return_value = _make_completion_response()
 
         with patch("src.api.main.get_router") as mock_get_router:
@@ -144,6 +146,7 @@ class TestCompletionsEndpoint:
 
     def test_completions_provider_exception_returns_500(self, client):
         mock_provider = AsyncMock()
+        mock_provider.name = "anthropic"
         mock_provider.complete.side_effect = RuntimeError("Provider error")
 
         with patch("src.api.main.get_router") as mock_get_router:
@@ -162,8 +165,9 @@ class TestCompletionsEndpoint:
 
         assert resp.status_code == 500
 
-    def test_completions_error_detail_in_response(self, client):
+    def test_completions_error_detail_is_generic(self, client):
         mock_provider = AsyncMock()
+        mock_provider.name = "anthropic"
         mock_provider.complete.side_effect = RuntimeError("Provider error")
 
         with patch("src.api.main.get_router") as mock_get_router:
@@ -180,10 +184,12 @@ class TestCompletionsEndpoint:
                 },
             )
 
-        assert "Provider error" in resp.json()["detail"]
+        assert resp.json()["detail"] == "Internal server error"
+        assert "Provider error" not in resp.text
 
     def test_completions_defaults_model_to_claude_haiku(self, client):
         mock_provider = AsyncMock()
+        mock_provider.name = "anthropic"
         mock_provider.complete.return_value = _make_completion_response()
 
         with patch("src.api.main.get_router") as mock_get_router:
@@ -202,6 +208,7 @@ class TestCompletionsEndpoint:
 
     def test_completions_routes_gpt_model_to_openai(self, client):
         mock_provider = AsyncMock()
+        mock_provider.name = "anthropic"
         mock_provider.complete.return_value = _make_completion_response(
             content="GPT response", model="gpt-4o-mini"
         )
@@ -225,6 +232,7 @@ class TestCompletionsEndpoint:
 
     def test_completions_passes_max_tokens(self, client):
         mock_provider = AsyncMock()
+        mock_provider.name = "anthropic"
         mock_provider.complete.return_value = _make_completion_response()
 
         with patch("src.api.main.get_router") as mock_get_router:
@@ -289,6 +297,7 @@ class TestCompletionsEndpoint:
         mock_redis.get.return_value = json.dumps(cached_response)
 
         mock_provider = AsyncMock()
+        mock_provider.name = "anthropic"
 
         with patch("src.api.main.get_router") as mock_get_router:
             mock_router = MagicMock()
@@ -320,6 +329,7 @@ class TestCompletionsRealProviderContract:
         bug class described in issue #1, and a plain MagicMock would never
         catch it."""
         provider_mock = AsyncMock(spec=AnthropicProvider)
+        provider_mock.name = "anthropic"
         provider_mock.complete.return_value = _make_completion_response()
 
         with patch("src.api.main.get_router") as mock_get_router:

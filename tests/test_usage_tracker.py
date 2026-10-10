@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from src.middleware.audit import key_fingerprint
 from src.middleware.usage_tracker import COST_PER_1M, UsageTracker
 
 
@@ -47,7 +48,7 @@ class TestUsageTrackerRecord:
         ut.record("key1", "gpt-4o", prompt_tokens=100, completion_tokens=50)
         mock_redis.lpush.assert_called_once()
         call_args = mock_redis.lpush.call_args[0]
-        assert call_args[0] == "usage:key1"
+        assert call_args[0] == f"usage:{key_fingerprint('key1')}"
         entry = json.loads(call_args[1])
         assert entry["model"] == "gpt-4o"
         assert entry["prompt_tokens"] == 100
@@ -56,7 +57,7 @@ class TestUsageTrackerRecord:
     def test_record_sets_24h_expiry(self, tracker):
         ut, mock_redis = tracker
         ut.record("key1", "gpt-4o", 100, 50)
-        mock_redis.expire.assert_called_once_with("usage:key1", 86400)
+        mock_redis.expire.assert_called_once_with(f"usage:{key_fingerprint('key1')}", 86400)
 
     def test_record_includes_timestamp(self, tracker):
         import time
@@ -166,4 +167,4 @@ class TestUsageTrackerGetUsage:
         ut, mock_redis = tracker
         mock_redis.lrange.return_value = []
         ut.get_usage("mykey")
-        mock_redis.lrange.assert_called_once_with("usage:mykey", 0, -1)
+        mock_redis.lrange.assert_called_once_with(f"usage:{key_fingerprint('mykey')}", 0, -1)
