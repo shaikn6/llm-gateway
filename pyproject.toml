@@ -1,10 +1,14 @@
 [project]
 name = "llm-gateway"
-version = "0.1.0"
+version = "1.1.0"
 requires-python = ">=3.11"
 dependencies = [
-    "anthropic>=0.30",
-    "openai>=1.30",
+    # Tested against anthropic 1.13.0 and openai 3.28.0. Both are capped at the
+    # next major because a major bump has already removed call parameters once
+    # (anthropic 1.0 dropped temperature/top_p from messages.create); see
+    # tests/test_sdk_contract.py, which fails if the SDK signature drifts.
+    "anthropic>=1.13,<2",
+    "openai>=3.28,<4",
     "fastapi>=0.111",
     "uvicorn[standard]>=0.30",
     "redis>=5.0",

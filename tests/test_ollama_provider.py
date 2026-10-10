@@ -240,3 +240,33 @@ class TestOllamaProviderHealthCheck:
         status = await provider.health_check()
         assert status.healthy is False
         assert "refused" in status.error
+
+
+class TestOllamaSamplingOptions:
+    """Explicit sampling params are forwarded as Ollama ``options``; defaults are not."""
+
+    async def _payload_for(self, **overrides):
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(
+            return_value=_make_httpx_response({"message": {"content": "ok"}})
+        )
+        with patch("src.providers.ollama.httpx.AsyncClient", return_value=mock_client):
+            provider = OllamaProvider()
+        provider._client = mock_client
+        await provider.complete(_make_request(**overrides))
+        return mock_client.post.call_args[1]["json"]
+
+    @pytest.mark.asyncio
+    async def test_no_options_when_caller_set_nothing(self):
+        payload = await self._payload_for()
+        assert "options" not in payload
+
+    @pytest.mark.asyncio
+    async def test_explicit_params_are_mapped_to_options(self):
+        payload = await self._payload_for(temperature=0.2, top_p=0.9, stop="END", max_tokens=64)
+        assert payload["options"] == {
+            "temperature": 0.2,
+            "top_p": 0.9,
+            "stop": ["END"],
+            "num_predict": 64,
+        }

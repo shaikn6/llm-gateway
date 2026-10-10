@@ -78,6 +78,14 @@ class ChatCompletionRequest(BaseModel):
     def effective_max_tokens(self) -> int | None:
         return self.max_completion_tokens or self.max_tokens
 
+    def explicit(self, field: str) -> Any | None:
+        """Value of ``field`` only if the caller set it; ``None`` for an untouched default.
+
+        Providers use this so they forward a sampling parameter only when the
+        caller asked for it, instead of always sending the schema default.
+        """
+        return getattr(self, field) if field in self.model_fields_set else None
+
 
 # ---------------------------------------------------------------------------
 # OpenAI-compatible response models

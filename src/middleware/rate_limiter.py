@@ -7,6 +7,8 @@ import uuid
 
 import redis
 
+from src.middleware.audit import key_fingerprint
+
 
 class RateLimiter:
     def __init__(
@@ -20,7 +22,7 @@ class RateLimiter:
         self._window = window_s
 
     def check(self, api_key: str) -> tuple[bool, int]:
-        key = f"ratelimit:{api_key}"
+        key = f"ratelimit:{key_fingerprint(api_key)}"
         now = time.time()
         pipe = self._redis.pipeline()
         pipe.zremrangebyscore(key, 0, now - self._window)
@@ -30,7 +32,7 @@ class RateLimiter:
         return allowed, max(0, self._limit - count - 1)
 
     def record(self, api_key: str) -> None:
-        key = f"ratelimit:{api_key}"
+        key = f"ratelimit:{key_fingerprint(api_key)}"
         now = time.time()
         self._redis.zadd(key, {str(uuid.uuid4()): now})
         self._redis.expire(key, self._window * 2)

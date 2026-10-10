@@ -1,10 +1,16 @@
 # Default values for llm-gateway
 replicaCount: 2
 
+# No image is published for this chart: CI only runs `docker build`, it does
+# not push. Build and push the image yourself, then point `repository` at it:
+#   docker build --target production -t <your-registry>/llm-gateway:1.1.0 .
+#   docker push <your-registry>/llm-gateway:1.1.0
+# The repository below is a placeholder until you do. An empty `tag` uses the
+# chart's appVersion; a mutable `latest` tag is deliberately not the default.
 image:
   repository: ghcr.io/shaikn6/llm-gateway
   pullPolicy: IfNotPresent
-  tag: "latest"
+  tag: ""
 
 imagePullSecrets: []
 nameOverride: ""
@@ -94,7 +100,7 @@ readinessProbe:
   timeoutSeconds: 3
   failureThreshold: 3
 
-# Redis sidecar for semantic caching
+# Redis sidecar for the response cache, rate limiter and usage tracker
 redis:
   enabled: true
   image:
@@ -137,6 +143,9 @@ externalSecrets:
   remoteRefs:
     openaiApiKey: "llm-gateway/openai-api-key"
     anthropicApiKey: "llm-gateway/anthropic-api-key"
+    # Comma-separated client keys (the app's API_KEYS). Required: the gateway
+    # refuses to start without it.
+    gatewayApiKeys: "llm-gateway/gateway-api-keys"
     ollamaHost: "llm-gateway/ollama-host"
 
 # Network policy

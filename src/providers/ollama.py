@@ -43,6 +43,19 @@ class OllamaProvider(LLMProvider):
             timeout=httpx.Timeout(timeout),
         )
 
+    @staticmethod
+    def _build_options(request: ChatCompletionRequest) -> dict:
+        """Map the caller's explicit sampling params onto Ollama ``options``."""
+        options: dict = {}
+        for name in ("temperature", "top_p"):
+            if (value := request.explicit(name)) is not None:
+                options[name] = value
+        if request.stop:
+            options["stop"] = [request.stop] if isinstance(request.stop, str) else request.stop
+        if request.effective_max_tokens():
+            options["num_predict"] = request.effective_max_tokens()
+        return options
+
     async def complete(self, request: ChatCompletionRequest) -> ChatCompletionResponse:
         messages = [{"role": m.role.value, "content": m.content or ""} for m in request.messages]
         payload = {
@@ -50,6 +63,8 @@ class OllamaProvider(LLMProvider):
             "messages": messages,
             "stream": False,
         }
+        if options := self._build_options(request):
+            payload["options"] = options
         try:
             resp = await self._client.post("/api/chat", json=payload)
             resp.raise_for_status()

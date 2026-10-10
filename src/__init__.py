@@ -1,3 +1,3 @@
-"""LLM Gateway - Production-grade LLM proxy with semantic caching, routing, and analytics."""
+"""LLM Gateway - OpenAI-compatible LLM proxy with response caching, routing, and usage tracking."""
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"

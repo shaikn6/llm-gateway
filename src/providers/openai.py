@@ -50,7 +50,7 @@ class OpenAIAsyncProvider(LLMProvider):
             raise ProviderAuthError("OPENAI_API_KEY is not set", provider=self.name)
         self._client = openai_lib.AsyncOpenAI(api_key=self.api_key, timeout=timeout)
 
-    async def complete(self, request: ChatCompletionRequest) -> ChatCompletionResponse:
+    def _build_kwargs(self, request: ChatCompletionRequest) -> dict:
         messages = [{"role": m.role.value, "content": m.content or ""} for m in request.messages]
         kwargs: dict = {
             "model": request.model,
@@ -58,9 +58,17 @@ class OpenAIAsyncProvider(LLMProvider):
         }
         if request.effective_max_tokens():
             kwargs["max_tokens"] = request.effective_max_tokens()
-        if request.temperature is not None:
-            kwargs["temperature"] = request.temperature
+        # Only forward what the caller set; an untouched schema default is not
+        # a request, and some models reject non-default sampling values.
+        for name in ("temperature", "top_p"):
+            if (value := request.explicit(name)) is not None:
+                kwargs[name] = value
+        if request.stop:
+            kwargs["stop"] = request.stop
+        return kwargs
 
+    async def complete(self, request: ChatCompletionRequest) -> ChatCompletionResponse:
+        kwargs = self._build_kwargs(request)
         try:
             resp = await self._client.chat.completions.create(**kwargs)
         except openai_lib.AuthenticationError as exc:

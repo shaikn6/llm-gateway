@@ -69,6 +69,11 @@ spec:
                 secretKeyRef:
                   name: {{ include "llm-gateway.fullname" . }}-secrets
                   key: anthropic-api-key
+            - name: API_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "llm-gateway.fullname" . }}-secrets
+                  key: gateway-api-keys
             - name: OLLAMA_HOST
               valueFrom:
                 secretKeyRef:

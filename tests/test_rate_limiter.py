@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from src.middleware.audit import key_fingerprint
 from src.middleware.rate_limiter import RateLimiter
 
 
@@ -78,7 +79,7 @@ class TestRateLimiterCheck:
 
         pipe.zremrangebyscore.assert_called_once()
         args = pipe.zremrangebyscore.call_args[0]
-        assert args[0] == "ratelimit:my-api-key"
+        assert args[0] == f"ratelimit:{key_fingerprint('my-api-key')}"
 
     def test_check_removes_stale_entries_before_counting(self, limiter):
         rl, mock_redis = limiter
@@ -90,7 +91,7 @@ class TestRateLimiterCheck:
 
         # zremrangebyscore should be called to remove expired entries
         pipe.zremrangebyscore.assert_called_once()
-        pipe.zcard.assert_called_once_with("ratelimit:api-key-1")
+        pipe.zcard.assert_called_once_with(f"ratelimit:{key_fingerprint('api-key-1')}")
 
     def test_empty_window_returns_max_remaining(self, limiter):
         rl, mock_redis = limiter
@@ -110,12 +111,12 @@ class TestRateLimiterRecord:
         rl.record("api-key-1")
         mock_redis.zadd.assert_called_once()
         call_args = mock_redis.zadd.call_args[0]
-        assert call_args[0] == "ratelimit:api-key-1"
+        assert call_args[0] == f"ratelimit:{key_fingerprint('api-key-1')}"
 
     def test_record_sets_expire(self, limiter):
         rl, mock_redis = limiter
         rl.record("api-key-1")
-        mock_redis.expire.assert_called_once_with("ratelimit:api-key-1", 120)  # window_s * 2
+        mock_redis.expire.assert_called_once_with(f"ratelimit:{key_fingerprint('api-key-1')}", 120)  # window_s * 2
 
     def test_record_uses_current_timestamp_as_score(self, limiter):
         rl, mock_redis = limiter
