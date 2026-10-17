@@ -1,7 +1,8 @@
 """A/B experiment endpoints.
 
 Experiments are held in process memory: they are lost on restart and are not
-shared between workers or replicas.
+shared between workers or replicas. Each API key (tenant) has its own registry,
+so a key can only list, assign or route by experiments it created itself.
 """
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,9 +10,16 @@ from pydantic import BaseModel, Field, model_validator
 
 from src.api.deps import require_api_key
 from src.gateway.ab_router import ABRouter, Experiment
+from src.middleware.audit import key_fingerprint
 
 router = APIRouter(prefix="/v1/experiments", tags=["experiments"])
-_ab_router = ABRouter()
+# One registry per tenant, keyed like usage/rate-limit state (key fingerprint).
+_tenant_routers: dict[str, ABRouter] = {}
+
+
+def tenant_ab_router(api_key: str) -> ABRouter:
+    """The caller's own experiment registry; other tenants' experiments are invisible."""
+    return _tenant_routers.setdefault(key_fingerprint(api_key), ABRouter())
 
 
 class Variant(BaseModel):
@@ -33,15 +41,14 @@ class ExperimentCreate(BaseModel):
 
 @router.get("")
 def list_experiments(api_key: str = Depends(require_api_key)):
-    return {
-        "experiments": [{"id": e.id, "variants": e.variants} for e in _ab_router.list_experiments()]
-    }
+    experiments = tenant_ab_router(api_key).list_experiments()
+    return {"experiments": [{"id": e.id, "variants": e.variants} for e in experiments]}
 
 
 @router.post("")
 def create_experiment(req: ExperimentCreate, api_key: str = Depends(require_api_key)):
     exp = Experiment(id=req.id, variants=[v.model_dump() for v in req.variants])
-    _ab_router.add_experiment(exp)
+    tenant_ab_router(api_key).add_experiment(exp)
     return {"id": exp.id, "variants": exp.variants}
 
 
@@ -50,7 +57,7 @@ def get_assignment(
     experiment_id: str, user_id: str = "default", api_key: str = Depends(require_api_key)
 ):
     try:
-        model = _ab_router.get_assignment(experiment_id, user_id)
+        model = tenant_ab_router(api_key).get_assignment(experiment_id, user_id)
         return {"experiment_id": experiment_id, "user_id": user_id, "model": model}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e

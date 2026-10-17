@@ -22,6 +22,7 @@ from src.providers.base import (
 )
 
 AUTH = {"X-API-Key": "dev-key-1"}
+AUTH_B = {"X-API-Key": "dev-key-2"}
 MESSAGES = [{"role": "user", "content": "Hello"}]
 SECRET = "sk-upstream-secret-do-not-leak"
 
@@ -363,6 +364,52 @@ class TestExperimentRouting:
         with patch.object(main_module.get_cache(), "get", return_value=None) as cache_get:
             _post(client, model="claude-haiku-4-5", messages=MESSAGES, experiment="route-cache")
         assert cache_get.call_args.args[0]["model"] == "gpt-4o-mini"
+
+
+class TestExperimentTenantIsolation:
+    """Experiments belong to the API key that created them."""
+
+    def _create(self, client, headers, exp_id, model):
+        resp = client.post(
+            "/v1/experiments",
+            headers=headers,
+            json={"id": exp_id, "variants": [{"model": model, "traffic_pct": 100}]},
+        )
+        assert resp.status_code == 200
+
+    def test_other_tenant_gets_404_on_assignment_and_list(self, client, redis_mocks):
+        self._create(client, AUTH, "iso-a", "gpt-4o-mini")
+        url = "/v1/experiments/iso-a/assignment"
+        assert client.get(url, headers=AUTH).status_code == 200
+        assert client.get(url, headers=AUTH_B).status_code == 404
+        listed = client.get("/v1/experiments", headers=AUTH_B).json()["experiments"]
+        assert "iso-a" not in [e["id"] for e in listed]
+
+    def test_other_tenant_cannot_route_completions_by_it(self, client, provider, redis_mocks):
+        self._create(client, AUTH, "iso-route", "gpt-4o-mini")
+        resp = client.post(
+            "/v1/chat/completions",
+            headers=AUTH_B,
+            json={"messages": MESSAGES, "experiment": "iso-route"},
+        )
+        assert resp.status_code == 404
+        provider.complete.assert_not_awaited()
+        redis_mocks["usage"].lpush.assert_not_called()
+        # The owner is unaffected.
+        assert _post(client, messages=MESSAGES, experiment="iso-route").status_code == 200
+
+    def test_same_id_for_another_tenant_does_not_overwrite(self, client, redis_mocks):
+        self._create(client, AUTH, "iso-same", "gpt-4o-mini")
+        self._create(client, AUTH_B, "iso-same", "claude-haiku-4-5")
+        url = "/v1/experiments/iso-same/assignment"
+        assert client.get(url, headers=AUTH).json()["model"] == "gpt-4o-mini"
+        assert client.get(url, headers=AUTH_B).json()["model"] == "claude-haiku-4-5"
+
+    def test_same_tenant_recreate_still_overwrites(self, client, redis_mocks):
+        self._create(client, AUTH, "iso-redo", "gpt-4o-mini")
+        self._create(client, AUTH, "iso-redo", "claude-haiku-4-5")
+        url = "/v1/experiments/iso-redo/assignment"
+        assert client.get(url, headers=AUTH).json()["model"] == "claude-haiku-4-5"
 
 
 # ---------------------------------------------------------------------------
