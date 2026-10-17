@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from src import __version__
 from src.api.routes.completions import router as completions_router
 from src.api.routes.experiments import router as experiments_router
+from src.api.routes.usage import router as usage_router
 from src.cache.semantic_cache import SemanticCache
 from src.config import settings
 from src.gateway.router import GatewayRouter
@@ -21,6 +22,7 @@ app = FastAPI(title="LLM Gateway", version=__version__)
 app.add_middleware(AuditMiddleware)
 app.include_router(completions_router)
 app.include_router(experiments_router)
+app.include_router(usage_router)
 
 @lru_cache(maxsize=1)
 def get_router() -> GatewayRouter:

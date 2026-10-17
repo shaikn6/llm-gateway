@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -11,6 +12,7 @@ from fastapi.testclient import TestClient
 import src.api.deps as deps_module
 import src.api.main as main_module
 from src.api.main import app
+from src.middleware.audit import key_fingerprint
 from src.models.schemas import ChatCompletionResponse, Choice, ChoiceMessage, UsageInfo
 from src.providers.base import (
     ProviderAuthError,
@@ -298,3 +300,112 @@ def test_health_reports_the_package_version(client):
     assert __version__ == "1.1.0"
     assert client.get("/health").json() == {"status": "ok", "version": "1.1.0"}
     assert app.version == "1.1.0"
+
+
+# ---------------------------------------------------------------------------
+# A/B routing on /v1/chat/completions
+# ---------------------------------------------------------------------------
+
+
+class TestExperimentRouting:
+    def _experiment(self, client, exp_id, variants):
+        resp = client.post("/v1/experiments", headers=AUTH, json={"id": exp_id, "variants": variants})
+        assert resp.status_code == 200
+
+    def test_request_is_served_by_the_assigned_variant_and_records_it(
+        self, client, provider, redis_mocks
+    ):
+        self._experiment(client, "route-all", [{"model": "gpt-4o-mini", "traffic_pct": 100}])
+        resp = _post(
+            client, model="claude-haiku-4-5", messages=MESSAGES, experiment="route-all", user="u1"
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["x-gateway-experiment"] == "route-all"
+        assert body["x-gateway-variant"] == "gpt-4o-mini"
+        provider.gateway.route.assert_called_once_with("gpt-4o-mini")
+        sent = provider.complete.await_args.args[0]
+        assert sent.model == "gpt-4o-mini"
+        assert not hasattr(sent, "experiment")
+        recorded = json.loads(redis_mocks["usage"].lpush.call_args.args[1])
+        assert recorded["model"] == "gpt-4o-mini"
+
+    def test_assignment_matches_the_assignment_endpoint(self, client, provider, redis_mocks):
+        self._experiment(
+            client,
+            "route-split",
+            [{"model": "gpt-4o-mini", "traffic_pct": 50}, {"model": "claude-haiku-4-5", "traffic_pct": 50}],
+        )
+        served = set()
+        for user in (f"user{i}" for i in range(20)):
+            expected = client.get(
+                f"/v1/experiments/route-split/assignment?user_id={user}", headers=AUTH
+            ).json()["model"]
+            resp = _post(client, messages=MESSAGES, experiment="route-split", user=user)
+            assert resp.json()["x-gateway-variant"] == expected
+            served.add(expected)
+        assert served == {"gpt-4o-mini", "claude-haiku-4-5"}
+
+    def test_unknown_experiment_is_404_and_calls_no_provider(self, client, provider, redis_mocks):
+        resp = _post(client, messages=MESSAGES, experiment="no-such-experiment")
+        assert resp.status_code == 404
+        provider.complete.assert_not_awaited()
+
+    def test_requests_without_an_experiment_are_unchanged(self, client, provider, redis_mocks):
+        resp = _post(client, model="gpt-4o", messages=MESSAGES)
+        assert resp.status_code == 200
+        assert "x-gateway-experiment" not in resp.json()
+        provider.gateway.route.assert_called_once_with("gpt-4o")
+        assert json.loads(redis_mocks["usage"].lpush.call_args.args[1])["model"] == "gpt-4o"
+
+    def test_cache_key_uses_the_assigned_model(self, client, provider, redis_mocks):
+        self._experiment(client, "route-cache", [{"model": "gpt-4o-mini", "traffic_pct": 100}])
+        with patch.object(main_module.get_cache(), "get", return_value=None) as cache_get:
+            _post(client, model="claude-haiku-4-5", messages=MESSAGES, experiment="route-cache")
+        assert cache_get.call_args.args[0]["model"] == "gpt-4o-mini"
+
+
+# ---------------------------------------------------------------------------
+# GET /v1/usage
+# ---------------------------------------------------------------------------
+
+
+class TestUsageEndpoint:
+    def test_returns_recorded_usage_for_the_calling_key(self, client, redis_mocks):
+        redis_mocks["usage"].lrange.return_value = [
+            json.dumps({"model": "gpt-4o-mini", "prompt_tokens": 1000, "completion_tokens": 500}),
+            json.dumps({"model": "gpt-4o-mini", "prompt_tokens": 1000, "completion_tokens": 500}),
+        ]
+        resp = client.get("/v1/usage", headers=AUTH)
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "total_requests": 2,
+            "input_tokens": 2000,
+            "output_tokens": 1000,
+            "cost_usd": 0.0009,
+            "by_model": {"gpt-4o-mini": pytest.approx(0.0009)},
+        }
+        redis_mocks["usage"].lrange.assert_called_once_with(
+            f"usage:{key_fingerprint('dev-key-1')}", 0, -1
+        )
+
+    def test_is_scoped_to_the_calling_key(self, client, redis_mocks):
+        client.get("/v1/usage", headers={"X-API-Key": "dev-key-2"})
+        redis_mocks["usage"].lrange.assert_called_once_with(
+            f"usage:{key_fingerprint('dev-key-2')}", 0, -1
+        )
+
+    def test_empty_usage_is_zeros(self, client, redis_mocks):
+        redis_mocks["usage"].lrange.return_value = []
+        assert client.get("/v1/usage", headers=AUTH).json()["total_requests"] == 0
+
+    @pytest.mark.parametrize("headers", [{}, {"X-API-Key": "nope"}])
+    def test_requires_a_valid_api_key(self, client, redis_mocks, headers):
+        assert client.get("/v1/usage", headers=headers).status_code == 401
+        redis_mocks["usage"].lrange.assert_not_called()
+
+    def test_usage_store_outage_is_503(self, client, redis_mocks):
+        redis_mocks["usage"].lrange.side_effect = redis.ConnectionError("down")
+        resp = client.get("/v1/usage", headers=AUTH)
+        assert resp.status_code == 503
+        assert resp.json() == {"detail": "Usage store unavailable"}
