@@ -179,11 +179,12 @@ Interactive docs: `http://localhost:8000/docs` (Swagger UI) · `http://localhost
 |--------|----------|------|-------------|
 | `GET` | `/health` | — | Health check — returns service version |
 | `POST` | `/v1/chat/completions` | `X-API-Key` | Chat completions in the OpenAI request/response shape (routes to Anthropic, OpenAI, or Ollama). Non-streaming only. |
+| `GET` | `/v1/usage` | `X-API-Key` | Token and USD cost totals recorded for the calling key (last 24 h), broken down by model |
 | `GET` | `/v1/experiments` | `X-API-Key` | List all A/B experiments |
 | `POST` | `/v1/experiments` | `X-API-Key` | Create a new A/B experiment (in-memory; `traffic_pct` must sum to 100) |
 | `GET` | `/v1/experiments/{experiment_id}/assignment` | `X-API-Key` | Get model assignment for a user |
 
-`/v1/chat/completions` accepts `model`, `messages` (at least one), `max_tokens` (default 1024), `temperature`, `top_p`, `stop`, and `stream: false`. Every other field — including `stream: true`, `tools`, `tool_choice`, `response_format`, `n` — is rejected with a `422` that names it. Status codes: `200`, `401` (bad or missing key), `422` (invalid request), `429` (over quota), `502` (upstream error), `503` (rate limiter unavailable), `504` (upstream timeout).
+`/v1/chat/completions` accepts `model`, `messages` (at least one), `max_tokens` (default 1024), `temperature`, `top_p`, `stop`, and `stream: false`. Optionally `experiment` (an experiment id) with `user` (the bucketing key, default `"default"`): the experiment's assignment, the same one `/v1/experiments/{id}/assignment` returns, replaces `model`, an unknown id is a `404`, and the response gains `x-gateway-experiment` and `x-gateway-variant`. Every other field — including `stream: true`, `tools`, `tool_choice`, `response_format`, `n` — is rejected with a `422` that names it. Status codes: `200`, `401` (bad or missing key), `422` (invalid request), `429` (over quota), `502` (upstream error), `503` (rate limiter unavailable), `504` (upstream timeout).
 
 Auth is enforced on every protected route — a request with a missing or unrecognized `X-API-Key` is rejected before it reaches the router, cache, or rate limiter:
 

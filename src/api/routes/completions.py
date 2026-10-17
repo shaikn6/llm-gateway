@@ -8,6 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from src.api.deps import require_api_key
+from src.api.routes.experiments import _ab_router
 from src.config import settings
 from src.models.schemas import ChatCompletionRequest, ChatMessage
 from src.providers.base import ProviderError, ProviderTimeoutError
@@ -30,6 +31,10 @@ class CompletionRequest(BaseModel):
     top_p: float | None = Field(default=None, ge=0.0, le=1.0)
     stop: str | list[str] | None = None
     stream: bool = False
+    # Opt-in A/B routing: when set, the experiment's assignment for ``user``
+    # (same bucketing as GET /v1/experiments/{id}/assignment) overrides ``model``.
+    experiment: str | None = None
+    user: str | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -59,16 +64,28 @@ async def create_completion(
 ):
     from src.api.main import get_cache, get_router, get_usage_tracker
 
+    model = req.model
+    if req.experiment is not None:
+        try:
+            model = _ab_router.get_assignment(req.experiment, req.user or "default")
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+
     # Sampling parameters the caller left out stay out, so providers can tell
     # "not set" from "set to the default".
-    chat_request = ChatCompletionRequest(**req.model_dump(exclude_none=True, exclude={"stream"}))
+    chat_request = ChatCompletionRequest(
+        **{
+            **req.model_dump(exclude_none=True, exclude={"stream", "experiment"}),
+            "model": model,
+        }
+    )
 
     cache = get_cache() if settings.cache_enabled else None
     try:
-        provider = get_router().route(req.model)
+        provider = get_router().route(model)
 
         # Everything that can change the answer goes into the cache key.
-        cache_request = {"provider": provider.name, **req.model_dump(mode="json")}
+        cache_request = {"provider": provider.name, **req.model_dump(mode="json"), "model": model}
         if cache is not None:
             cached = cache.get(cache_request, tenant=api_key)
             if cached is not None:
@@ -92,6 +109,9 @@ async def create_completion(
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
     response_dict = response.model_dump(by_alias=True)
+    if req.experiment is not None:
+        response_dict["x-gateway-experiment"] = req.experiment
+        response_dict["x-gateway-variant"] = model
 
     if cache is not None:
         cache.set(cache_request, response_dict, tenant=api_key)
@@ -99,7 +119,7 @@ async def create_completion(
     background_tasks.add_task(
         get_usage_tracker().record,
         api_key,
-        req.model,
+        model,
         response.usage.prompt_tokens,
         response.usage.completion_tokens,
     )

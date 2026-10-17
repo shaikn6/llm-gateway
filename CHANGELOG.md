@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here.
 
+## [Unreleased]
+
+### Added
+- `POST /v1/chat/completions` accepts `experiment` (and `user`, the bucketing
+  key, default `"default"`): the experiment's assignment replaces `model`, and
+  the response carries `x-gateway-experiment` / `x-gateway-variant`. Usage and
+  the cache key use the served model.
+- `GET /v1/usage` returns the calling key's token and cost totals.
+
 ## [1.1.0] - 2026-10-10
 
 Version numbers are now aligned: `pyproject.toml`, `src.__version__`, the
