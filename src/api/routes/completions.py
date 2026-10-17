@@ -8,7 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from src.api.deps import require_api_key
-from src.api.routes.experiments import _ab_router
+from src.api.routes.experiments import tenant_ab_router
 from src.config import settings
 from src.models.schemas import ChatCompletionRequest, ChatMessage
 from src.providers.base import ProviderError, ProviderTimeoutError
@@ -67,7 +67,9 @@ async def create_completion(
     model = req.model
     if req.experiment is not None:
         try:
-            model = _ab_router.get_assignment(req.experiment, req.user or "default")
+            model = tenant_ab_router(api_key).get_assignment(
+                req.experiment, req.user or "default"
+            )
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e)) from e
 
