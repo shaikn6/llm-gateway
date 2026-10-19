@@ -9,7 +9,6 @@ Covers uncovered branches in:
 - src/api/main.py             (get_router singleton, health endpoint extras)
 - src/models/schemas.py       (ErrorResponse.create, effective_max_tokens, all validators)
 - src/middleware/usage_tracker.py (claude-sonnet-4-6 cost calc, multi-model by_model)
-- src/middleware/rate_limiter.py  (pipeline key check edge cases)
 - src/cache/semantic_cache.py     (multi-message lists, empty list)
 - src/config.py               (Settings custom overrides, multiple env vars)
 """
@@ -1117,54 +1116,6 @@ class TestUsageTrackerCostBranches:
             (200 * 5.0 + 100 * 15.0) / 1_000_000
         )
         assert abs(result["by_model"]["gpt-4o"] - expected_total) < 0.000001
-
-
-# ---------------------------------------------------------------------------
-# src/middleware/rate_limiter.py — additional edge-case branches
-# ---------------------------------------------------------------------------
-
-
-class TestRateLimiterEdgeCases:
-    def _make_limiter(self, limit=100, window_s=60):
-        mock_redis = MagicMock()
-        with patch("src.middleware.rate_limiter.redis.from_url", return_value=mock_redis):
-            from src.middleware.rate_limiter import RateLimiter
-            rl = RateLimiter(limit=limit, window_s=window_s)
-        return rl, mock_redis
-
-    def test_remaining_is_max_0_when_over_limit(self):
-        rl, mock_redis = self._make_limiter(limit=10)
-        pipe = MagicMock()
-        pipe.execute.return_value = [None, 20]  # way over limit
-        mock_redis.pipeline.return_value = pipe
-
-        allowed, remaining = rl.check("key")
-        assert allowed is False
-        assert remaining == 0  # max(0, 10 - 20 - 1) => 0
-
-    def test_custom_window_used_in_pipeline(self):
-        rl, mock_redis = self._make_limiter(window_s=120)
-        pipe = MagicMock()
-        pipe.execute.return_value = [None, 0]
-        mock_redis.pipeline.return_value = pipe
-
-        rl.check("key")
-        args = pipe.zremrangebyscore.call_args[0]
-        assert args[0] == f"ratelimit:{key_fingerprint('key')}"
-
-    def test_record_expire_uses_double_window(self):
-        rl, mock_redis = self._make_limiter(window_s=30)
-        rl.record("mykey")
-        mock_redis.expire.assert_called_once_with(f"ratelimit:{key_fingerprint('mykey')}", 60)  # 30 * 2
-
-    def test_check_pipeline_executes(self):
-        rl, mock_redis = self._make_limiter()
-        pipe = MagicMock()
-        pipe.execute.return_value = [None, 5]
-        mock_redis.pipeline.return_value = pipe
-
-        rl.check("key")
-        pipe.execute.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

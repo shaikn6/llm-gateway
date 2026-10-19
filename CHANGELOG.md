@@ -11,6 +11,13 @@ All notable changes to this project are documented here.
   the cache key use the served model.
 - `GET /v1/usage` returns the calling key's token and cost totals.
 
+### Fixed
+- The rate limiter checked the window and recorded the request in two separate
+  Redis calls, so concurrent requests could all read the same count and all be
+  admitted: 64 simultaneous callers against a limit of 10 were all let through.
+  Trim, count and record now run as one Lua script (`RateLimiter.acquire`), and
+  a denied request records nothing. `RateLimiter.check` / `record` are removed.
+
 ## [1.1.0] - 2026-10-10
 
 Version numbers are now aligned: `pyproject.toml`, `src.__version__`, the

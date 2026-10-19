@@ -40,9 +40,7 @@ def _reset_singletons_and_mock_redis():
     allowed" and the cache defaults to "always miss" unless a test
     overrides the mock's return values."""
     mock_redis = MagicMock()
-    pipe = MagicMock()
-    pipe.execute.return_value = [None, 0]  # well under any configured limit
-    mock_redis.pipeline.return_value = pipe
+    mock_redis.eval.return_value = [1, 99]  # rate limiter: allowed
     mock_redis.get.return_value = None  # cache miss by default
 
     with (
@@ -280,9 +278,7 @@ class TestCompletionsEndpoint:
 
     def test_completions_rate_limited_returns_429(self, client, _reset_singletons_and_mock_redis):
         mock_redis = _reset_singletons_and_mock_redis
-        pipe = MagicMock()
-        pipe.execute.return_value = [None, 1000]  # way over any configured limit
-        mock_redis.pipeline.return_value = pipe
+        mock_redis.eval.return_value = [0, 0]  # rate limiter: denied
 
         resp = client.post(
             "/v1/chat/completions",

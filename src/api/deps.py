@@ -43,9 +43,7 @@ def require_api_key(api_key: str = Depends(get_api_key)) -> str:
     """
     limiter = get_rate_limiter()
     try:
-        allowed, _remaining = limiter.check(api_key)
-        if allowed:
-            limiter.record(api_key)
+        allowed, _remaining = limiter.acquire(api_key)
     except redis.RedisError as exc:
         raise HTTPException(
             status_code=503,

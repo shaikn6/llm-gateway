@@ -46,7 +46,7 @@ def _dict_backed_redis() -> MagicMock:
     fake = MagicMock()
     fake.get.side_effect = store.get
     fake.setex.side_effect = lambda key, _ttl, value: store.__setitem__(key, value)
-    fake.pipeline.return_value.execute.return_value = [None, 0]
+    fake.eval.return_value = [1, 99]  # rate limiter: allowed
     return fake
 
 
