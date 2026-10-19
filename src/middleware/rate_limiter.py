@@ -9,6 +9,24 @@ import redis
 
 from src.middleware.audit import key_fingerprint
 
+# Trim, count and (if under the limit) record run as one Lua script. Redis executes a
+# script without interleaving other commands, so concurrent callers cannot all read the
+# same count and then all be admitted, which is what a separate check + record allowed.
+# Returns {allowed, remaining}.
+_ACQUIRE_LUA = """
+local now = tonumber(ARGV[1])
+local window = tonumber(ARGV[2])
+local limit = tonumber(ARGV[3])
+redis.call('ZREMRANGEBYSCORE', KEYS[1], 0, now - window)
+local count = redis.call('ZCARD', KEYS[1])
+if count >= limit then
+    return {0, 0}
+end
+redis.call('ZADD', KEYS[1], now, ARGV[4])
+redis.call('EXPIRE', KEYS[1], window * 2)
+return {1, limit - count - 1}
+"""
+
 
 class RateLimiter:
     def __init__(
@@ -21,18 +39,13 @@ class RateLimiter:
         self._limit = limit
         self._window = window_s
 
-    def check(self, api_key: str) -> tuple[bool, int]:
-        key = f"ratelimit:{key_fingerprint(api_key)}"
-        now = time.time()
-        pipe = self._redis.pipeline()
-        pipe.zremrangebyscore(key, 0, now - self._window)
-        pipe.zcard(key)
-        _, count = pipe.execute()
-        allowed = count < self._limit
-        return allowed, max(0, self._limit - count - 1)
+    def acquire(self, api_key: str) -> tuple[bool, int]:
+        """Atomically take one slot in the key's window.
 
-    def record(self, api_key: str) -> None:
+        Returns (allowed, remaining). A denied call records nothing.
+        """
         key = f"ratelimit:{key_fingerprint(api_key)}"
-        now = time.time()
-        self._redis.zadd(key, {str(uuid.uuid4()): now})
-        self._redis.expire(key, self._window * 2)
+        allowed, remaining = self._redis.eval(
+            _ACQUIRE_LUA, 1, key, time.time(), self._window, self._limit, str(uuid.uuid4())
+        )
+        return bool(allowed), int(remaining)

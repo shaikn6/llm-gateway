@@ -2,141 +2,91 @@
 
 from __future__ import annotations
 
-import time
 from unittest.mock import MagicMock, patch
 
+import fakeredis
 import pytest
+import redis
 
 from src.middleware.audit import key_fingerprint
 from src.middleware.rate_limiter import RateLimiter
 
 
 @pytest.fixture
-def mock_redis():
-    return MagicMock()
+def server():
+    return fakeredis.FakeServer()
 
 
 @pytest.fixture
-def limiter(mock_redis):
-    with patch("src.middleware.rate_limiter.redis.from_url", return_value=mock_redis):
-        rl = RateLimiter(redis_url="redis://localhost:6379/0", limit=100, window_s=60)
-    return rl, mock_redis
+def make_limiter(server):
+    def _make(limit: int = 3, window_s: int = 60) -> RateLimiter:
+        with patch(
+            "src.middleware.rate_limiter.redis.from_url",
+            return_value=fakeredis.FakeRedis(server=server),
+        ):
+            return RateLimiter(limit=limit, window_s=window_s)
+
+    return _make
 
 
-class TestRateLimiterCheck:
-    def test_allowed_when_under_limit(self, limiter):
-        rl, mock_redis = limiter
-        # pipeline returns: (None, 50) — 50 requests in window
-        pipe = MagicMock()
-        pipe.execute.return_value = [None, 50]
-        mock_redis.pipeline.return_value = pipe
+class TestRateLimiterAcquire:
+    def test_admits_until_limit_then_denies(self, make_limiter):
+        rl = make_limiter(limit=3)
 
-        allowed, remaining = rl.check("api-key-1")
-
-        assert allowed is True
-        assert remaining == 49  # 100 - 50 - 1
-
-    def test_denied_when_at_limit(self, limiter):
-        rl, mock_redis = limiter
-        pipe = MagicMock()
-        pipe.execute.return_value = [None, 100]
-        mock_redis.pipeline.return_value = pipe
-
-        allowed, remaining = rl.check("api-key-1")
-
-        assert allowed is False
-        assert remaining == 0
-
-    def test_denied_when_over_limit(self, limiter):
-        rl, mock_redis = limiter
-        pipe = MagicMock()
-        pipe.execute.return_value = [None, 150]
-        mock_redis.pipeline.return_value = pipe
-
-        allowed, remaining = rl.check("api-key-1")
-
-        assert allowed is False
-        assert remaining == 0  # max(0, 100 - 150 - 1) => 0
-
-    def test_remaining_is_zero_when_one_under_limit(self, limiter):
-        rl, mock_redis = limiter
-        pipe = MagicMock()
-        pipe.execute.return_value = [None, 99]
-        mock_redis.pipeline.return_value = pipe
-
-        allowed, remaining = rl.check("api-key-1")
-
-        assert allowed is True
-        assert remaining == 0
-
-    def test_check_uses_correct_redis_key(self, limiter):
-        rl, mock_redis = limiter
-        pipe = MagicMock()
-        pipe.execute.return_value = [None, 0]
-        mock_redis.pipeline.return_value = pipe
-
-        rl.check("my-api-key")
-
-        pipe.zremrangebyscore.assert_called_once()
-        args = pipe.zremrangebyscore.call_args[0]
-        assert args[0] == f"ratelimit:{key_fingerprint('my-api-key')}"
-
-    def test_check_removes_stale_entries_before_counting(self, limiter):
-        rl, mock_redis = limiter
-        pipe = MagicMock()
-        pipe.execute.return_value = [None, 5]
-        mock_redis.pipeline.return_value = pipe
-
-        rl.check("api-key-1")
-
-        # zremrangebyscore should be called to remove expired entries
-        pipe.zremrangebyscore.assert_called_once()
-        pipe.zcard.assert_called_once_with(f"ratelimit:{key_fingerprint('api-key-1')}")
-
-    def test_empty_window_returns_max_remaining(self, limiter):
-        rl, mock_redis = limiter
-        pipe = MagicMock()
-        pipe.execute.return_value = [None, 0]
-        mock_redis.pipeline.return_value = pipe
-
-        allowed, remaining = rl.check("api-key-1")
-
-        assert allowed is True
-        assert remaining == 99  # 100 - 0 - 1
-
-
-class TestRateLimiterRecord:
-    def test_record_adds_to_sorted_set(self, limiter):
-        rl, mock_redis = limiter
-        rl.record("api-key-1")
-        mock_redis.zadd.assert_called_once()
-        call_args = mock_redis.zadd.call_args[0]
-        assert call_args[0] == f"ratelimit:{key_fingerprint('api-key-1')}"
-
-    def test_record_sets_expire(self, limiter):
-        rl, mock_redis = limiter
-        rl.record("api-key-1")
-        mock_redis.expire.assert_called_once_with(f"ratelimit:{key_fingerprint('api-key-1')}", 120)  # window_s * 2
-
-    def test_record_uses_current_timestamp_as_score(self, limiter):
-        rl, mock_redis = limiter
-        before = time.time()
-        rl.record("api-key-1")
-        after = time.time()
-
-        call_args = mock_redis.zadd.call_args[0]
-        score = next(iter(call_args[1].values()))
-        assert before <= score <= after
-
-    def test_record_uses_unique_uuid_as_member(self, limiter):
-        rl, mock_redis = limiter
-        rl.record("key")
-        rl.record("key")
-        all_members = [
-            next(iter(call[0][1].keys()))
-            for call in mock_redis.zadd.call_args_list
+        assert [rl.acquire("k") for _ in range(4)] == [
+            (True, 2),
+            (True, 1),
+            (True, 0),
+            (False, 0),
         ]
-        assert all_members[0] != all_members[1]
+
+    def test_denied_call_records_nothing(self, make_limiter, server):
+        rl = make_limiter(limit=1)
+        rl.acquire("k")
+        rl.acquire("k")
+        rl.acquire("k")
+
+        zset = f"ratelimit:{key_fingerprint('k')}"
+        assert fakeredis.FakeRedis(server=server).zcard(zset) == 1
+
+    def test_keys_are_independent(self, make_limiter):
+        rl = make_limiter(limit=1)
+
+        assert rl.acquire("a")[0] is True
+        assert rl.acquire("b")[0] is True
+        assert rl.acquire("a")[0] is False
+
+    def test_stores_under_fingerprint_not_raw_key(self, make_limiter, server):
+        rl = make_limiter()
+        rl.acquire("secret-key")
+
+        keys = fakeredis.FakeRedis(server=server).keys("*")
+        assert keys == [f"ratelimit:{key_fingerprint('secret-key')}".encode()]
+
+    def test_window_slides(self, make_limiter):
+        rl = make_limiter(limit=1, window_s=60)
+        with patch("src.middleware.rate_limiter.time.time", return_value=1000.0):
+            assert rl.acquire("k")[0] is True
+        with patch("src.middleware.rate_limiter.time.time", return_value=1059.0):
+            assert rl.acquire("k")[0] is False  # first request still inside the window
+        with patch("src.middleware.rate_limiter.time.time", return_value=1061.0):
+            assert rl.acquire("k")[0] is True  # first request has aged out
+
+    def test_sets_ttl_of_double_the_window(self, make_limiter, server):
+        rl = make_limiter(window_s=30)
+        rl.acquire("k")
+
+        zset = f"ratelimit:{key_fingerprint('k')}"
+        assert fakeredis.FakeRedis(server=server).ttl(zset) == 60
+
+    def test_redis_error_propagates(self):
+        mock_redis = MagicMock()
+        mock_redis.eval.side_effect = redis.ConnectionError("down")
+        with patch("src.middleware.rate_limiter.redis.from_url", return_value=mock_redis):
+            rl = RateLimiter()
+
+        with pytest.raises(redis.ConnectionError):
+            rl.acquire("k")
 
 
 class TestRateLimiterInit:

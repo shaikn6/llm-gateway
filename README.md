@@ -71,7 +71,7 @@ The gateway is deliberately small and composable. Each concern is an isolated mo
 
 - **Response caching (`src/cache/semantic_cache.py`).** An exact-match cache, not a semantic one — the `SemanticCache` class name is historical and there are no embeddings or similarity search. The key is a `SHA-256` over the canonicalized (`sort_keys`) request — provider, model, messages, `max_tokens`, `temperature`, `top_p`, `stop` — prefixed with a fingerprint of the caller's API key, stored in Redis with a configurable TTL. A hit therefore needs the same caller sending a byte-identical request; a different model, parameter, or API key is a miss, and one caller can never be served another's cached answer.
 
-- **Rate limiting (`src/middleware/rate_limiter.py`).** A true sliding window built on Redis sorted sets: each request is a `ZADD` with a timestamp score, expired entries are trimmed with `ZREMRANGEBYSCORE`, and the live `ZCARD` is compared to the limit. The check is pipelined to a single round trip and returns remaining quota.
+- **Rate limiting (`src/middleware/rate_limiter.py`).** A true sliding window built on Redis sorted sets: each request is a `ZADD` with a timestamp score, expired entries are trimmed with `ZREMRANGEBYSCORE`, and the live `ZCARD` is compared to the limit. Trim, count and record run as one Lua script, so concurrent requests cannot oversubscribe the window, and a denied request records nothing.
 
 - **Cost accounting (`src/middleware/usage_tracker.py`).** Per-key token usage is pushed to a Redis list; `get_usage()` aggregates input/output tokens and computes USD cost from a per-model price table (`COST_PER_1M`), broken down by model.
 
@@ -81,7 +81,7 @@ The gateway is deliberately small and composable. Each concern is an isolated mo
 |----------|-----------|
 | Hash-based cache key (not embeddings) | Exact-match caching is deterministic, dependency-free, and avoids false-positive cache hits on semantically-similar-but-different prompts. |
 | MD5 bucketing for A/B | Stateless, reproducible assignment; no database, consistent across restarts. |
-| Redis sorted-set rate limiter | Real sliding window (not fixed buckets), single pipelined round trip per check. |
+| Redis sorted-set rate limiter | Real sliding window (not fixed buckets), one atomic Lua script (single round trip) per request. |
 | Typed provider error hierarchy, generic client errors | Vendor errors are distinguishable in code and logs by type and upstream status; callers only ever see `502` / `504` with a fixed message, so upstream error text cannot leak through the gateway. |
 | Reject unsupported request fields | `stream`, `tools`, and any other field the gateway does not forward are a `422` naming the field, rather than being accepted and silently dropped. |
 | Fail closed when the limiter's Redis is down | See the outage table above. |

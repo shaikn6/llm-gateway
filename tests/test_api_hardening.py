@@ -38,7 +38,7 @@ def _clear_singletons():
 def redis_mocks():
     """Separate mock Redis clients per component so each can fail on its own."""
     limiter, cache, usage = MagicMock(), MagicMock(), MagicMock()
-    limiter.pipeline.return_value.execute.return_value = [None, 0]
+    limiter.eval.return_value = [1, 99]  # allowed
     cache.get.return_value = None
     # All three components call the same ``redis.from_url``; build the singletons
     # under one patch, then give each its own client.
@@ -198,29 +198,27 @@ class TestRedisOutage:
     def test_rate_limiter_fails_closed_with_503_and_retry_after(
         self, client, provider, redis_mocks
     ):
-        redis_mocks["limiter"].pipeline.return_value.execute.side_effect = redis.ConnectionError(
-            "Connection refused"
-        )
+        redis_mocks["limiter"].eval.side_effect = redis.ConnectionError("Connection refused")
         resp = _post(client, messages=MESSAGES)
         assert resp.status_code == 503
         assert resp.headers["Retry-After"] == "5"
         assert resp.json() == {"detail": "Rate limiter unavailable"}
         provider.complete.assert_not_awaited()
 
-    def test_rate_limiter_record_failure_also_fails_closed(self, client, provider, redis_mocks):
-        redis_mocks["limiter"].zadd.side_effect = redis.TimeoutError("slow")
+    def test_rate_limiter_timeout_also_fails_closed(self, client, provider, redis_mocks):
+        redis_mocks["limiter"].eval.side_effect = redis.TimeoutError("slow")
         resp = _post(client, messages=MESSAGES)
         assert resp.status_code == 503
         provider.complete.assert_not_awaited()
 
     def test_experiments_routes_fail_closed_too(self, client, redis_mocks):
-        redis_mocks["limiter"].pipeline.return_value.execute.side_effect = redis.ConnectionError()
+        redis_mocks["limiter"].eval.side_effect = redis.ConnectionError()
         resp = client.get("/v1/experiments", headers=AUTH)
         assert resp.status_code == 503
         assert "Retry-After" in resp.headers
 
     def test_bad_key_is_still_401_when_redis_is_down(self, client, redis_mocks):
-        redis_mocks["limiter"].pipeline.return_value.execute.side_effect = redis.ConnectionError()
+        redis_mocks["limiter"].eval.side_effect = redis.ConnectionError()
         resp = client.post(
             "/v1/chat/completions", headers={"X-API-Key": "nope"}, json={"messages": MESSAGES}
         )
@@ -240,7 +238,7 @@ class TestRedisOutage:
         assert _post(client, messages=MESSAGES).status_code == 200
 
     def test_health_does_not_depend_on_redis(self, client, redis_mocks):
-        redis_mocks["limiter"].pipeline.return_value.execute.side_effect = redis.ConnectionError()
+        redis_mocks["limiter"].eval.side_effect = redis.ConnectionError()
         assert client.get("/health").status_code == 200
 
 

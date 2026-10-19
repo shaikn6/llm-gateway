@@ -23,6 +23,7 @@ dev = [
     "pytest-cov>=5.0",
     "pytest-asyncio>=0.23",
     "pytest-mock>=3.14",
+    "fakeredis[lua]>=2.40",
     "ruff==0.17.0",
     "mypy>=1.10",
 ]

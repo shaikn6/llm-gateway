@@ -31,9 +31,7 @@ def _mock_redis():
     """Back every Redis-using singleton with a mocked client (rate limit
     always-allow, cache always-miss) so these tests need no live server."""
     mock_redis = MagicMock()
-    pipe = MagicMock()
-    pipe.execute.return_value = [None, 0]
-    mock_redis.pipeline.return_value = pipe
+    mock_redis.eval.return_value = [1, 99]  # rate limiter: allowed
     mock_redis.get.return_value = None
     with (
         patch("src.middleware.rate_limiter.redis.from_url", return_value=mock_redis),
