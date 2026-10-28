@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -10,6 +11,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from src.api.deps import require_api_key
 from src.api.routes.experiments import tenant_ab_router
 from src.config import settings
+from src.middleware.usage_tracker import request_cost_usd
 from src.models.schemas import ChatCompletionRequest, ChatMessage
 from src.providers.base import ProviderError, ProviderTimeoutError
 
@@ -83,6 +85,7 @@ async def create_completion(
     )
 
     cache = get_cache() if settings.cache_enabled else None
+    started = time.perf_counter()
     try:
         provider = get_router().route(model)
 
@@ -91,7 +94,13 @@ async def create_completion(
         if cache is not None:
             cached = cache.get(cache_request, tenant=api_key)
             if cached is not None:
-                return cached
+                # Nothing was sent upstream, so nothing was billed for this call.
+                return {
+                    **cached,
+                    "x-gateway-cache": "hit",
+                    "x-gateway-cost-usd": 0.0,
+                    "x-gateway-latency-ms": round((time.perf_counter() - started) * 1000),
+                }
 
         response = await provider.complete(chat_request)
     except ProviderTimeoutError as e:
@@ -111,6 +120,12 @@ async def create_completion(
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
     response_dict = response.model_dump(by_alias=True)
+    response_dict["x-gateway-provider"] = provider.name
+    response_dict["x-gateway-cache"] = "miss" if cache is not None else "disabled"
+    response_dict["x-gateway-cost-usd"] = request_cost_usd(
+        model, response.usage.prompt_tokens, response.usage.completion_tokens
+    )
+    response_dict["x-gateway-latency-ms"] = round((time.perf_counter() - started) * 1000)
     if req.experiment is not None:
         response_dict["x-gateway-experiment"] = req.experiment
         response_dict["x-gateway-variant"] = model

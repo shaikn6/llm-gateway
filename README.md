@@ -8,7 +8,7 @@
 [![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker)](docker-compose.yml)
-[![Tests](https://img.shields.io/badge/tests-424%20passing-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-428%20passing-brightgreen)](tests/)
 [![Coverage](https://img.shields.io/badge/coverage-99%25-brightgreen)](tests/)
 
 **A single OpenAI-compatible endpoint in front of Anthropic, OpenAI, and local Ollama models — with exact-match response caching, sliding-window rate limiting, deterministic A/B routing, and per-key cost tracking, all backed by Redis.**
@@ -135,7 +135,7 @@ Stop the three background processes with `kill %1 %2 %3`.
 To use the real providers, set real `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` values and leave `ANTHROPIC_BASE_URL` unset. Nothing in this repository's tests or CI calls a live provider API, so that path is exercised only through the real SDK request code against a fake transport.
 
 ```bash
-.venv/bin/pytest --cov=src --cov-report=term-missing --cov-fail-under=95   # 424 passed, 99% line coverage
+.venv/bin/pytest --cov=src --cov-report=term-missing --cov-fail-under=95   # 428 passed, 99% line coverage
 .venv/bin/ruff check src/ tests/                                           # lint (CI-gated; mypy is unpinned/advisory, not CI-gated)
 ```
 
@@ -153,7 +153,7 @@ Configuration is environment-driven (`.env`, see `.env.example`):
 
 ## Testing
 
-`pytest` collects **424 tests** (389 test functions, some parametrized) across 20 files in `tests/`. Line coverage on `src/` is 99% (`pytest --cov=src --cov-report=term-missing`; CI fails under 95%). Redis is mocked throughout, and no test opens a network connection.
+`pytest` collects **428 tests** (393 test functions, some parametrized) across 20 files in `tests/`. Line coverage on `src/` is 99% (`pytest --cov=src --cov-report=term-missing`; CI fails under 95%). Redis is mocked throughout, and no test opens a network connection.
 
 Beyond the provider adapters, the A/B bucketing math, the sliding-window limiter, usage/cost aggregation and the audit log, the suite pins down the behaviours that are easy to get wrong:
 
@@ -184,7 +184,7 @@ Interactive docs: `http://localhost:8000/docs` (Swagger UI) · `http://localhost
 | `POST` | `/v1/experiments` | `X-API-Key` | Create a new A/B experiment (in-memory; `traffic_pct` must sum to 100) |
 | `GET` | `/v1/experiments/{experiment_id}/assignment` | `X-API-Key` | Get model assignment for a user |
 
-`/v1/chat/completions` accepts `model`, `messages` (at least one), `max_tokens` (default 1024), `temperature`, `top_p`, `stop`, and `stream: false`. Optionally `experiment` (an experiment id) with `user` (the bucketing key, default `"default"`): the experiment's assignment, the same one `/v1/experiments/{id}/assignment` returns, replaces `model`, an unknown id is a `404`, and the response body gains `x-gateway-experiment` and `x-gateway-variant` fields (they are JSON fields, not HTTP headers). Every other field — including `stream: true`, `tools`, `tool_choice`, `response_format`, `n` — is rejected with a `422` that names it. Status codes: `200`, `401` (bad or missing key), `422` (invalid request), `429` (over quota), `502` (upstream error), `503` (rate limiter unavailable), `504` (upstream timeout).
+`/v1/chat/completions` accepts `model`, `messages` (at least one), `max_tokens` (default 1024), `temperature`, `top_p`, `stop`, and `stream: false`. Optionally `experiment` (an experiment id) with `user` (the bucketing key, default `"default"`): the experiment's assignment, the same one `/v1/experiments/{id}/assignment` returns, replaces `model`, an unknown id is a `404`, and the response body gains `x-gateway-experiment` and `x-gateway-variant` fields (they are JSON fields, not HTTP headers). Every `200` body also carries `x-gateway-provider`, `x-gateway-cache` (`miss`, `hit` or `disabled`), `x-gateway-cost-usd` (`0.0` on a cache hit, `null` for a model with no listed price) and `x-gateway-latency-ms` (gateway time for this call). Every other field — including `stream: true`, `tools`, `tool_choice`, `response_format`, `n` — is rejected with a `422` that names it. Status codes: `200`, `401` (bad or missing key), `422` (invalid request), `429` (over quota), `502` (upstream error), `503` (rate limiter unavailable), `504` (upstream timeout).
 
 Auth is enforced on every protected route — a request with a missing or unrecognized `X-API-Key` is rejected before it reaches the router, cache, or rate limiter:
 
