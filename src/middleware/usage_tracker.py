@@ -20,6 +20,14 @@ COST_PER_1M = {
 logger = logging.getLogger(__name__)
 
 
+def request_cost_usd(model: str, prompt_tokens: int, completion_tokens: int) -> float | None:
+    """Cost of one call from the price table, or None when the model has no listed price."""
+    prices = COST_PER_1M.get(model)
+    if prices is None:
+        return None
+    return (prompt_tokens * prices["input"] + completion_tokens * prices["output"]) / 1_000_000
+
+
 class UsageTracker:
     def __init__(self, redis_url: str = "redis://localhost:6379/0"):
         self._redis = redis.from_url(redis_url, decode_responses=True)
@@ -50,10 +58,7 @@ class UsageTracker:
             m = d["model"]
             total_input += d["prompt_tokens"]
             total_output += d["completion_tokens"]
-            cost_map = COST_PER_1M.get(m, {"input": 0, "output": 0})
-            cost = (
-                d["prompt_tokens"] * cost_map["input"] + d["completion_tokens"] * cost_map["output"]
-            ) / 1_000_000
+            cost = request_cost_usd(m, d["prompt_tokens"], d["completion_tokens"]) or 0.0
             total_cost += cost
             by_model[m] = by_model.get(m, 0) + cost
         return {

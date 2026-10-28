@@ -364,6 +364,39 @@ class TestExperimentRouting:
         assert cache_get.call_args.args[0]["model"] == "gpt-4o-mini"
 
 
+class TestGatewayMetadata:
+    """The x-gateway-* response fields describe the call that was just served."""
+
+    def test_a_fresh_call_reports_provider_miss_cost_and_latency(self, client, provider, redis_mocks):
+        body = _post(client, model="claude-haiku-4-5", messages=MESSAGES).json()
+        assert body["x-gateway-provider"] == "anthropic"
+        assert body["x-gateway-cache"] == "miss"
+        # 1 prompt + 1 completion token at 0.25 / 1.25 USD per million.
+        assert body["x-gateway-cost-usd"] == pytest.approx(1.5e-6)
+        assert isinstance(body["x-gateway-latency-ms"], int) and body["x-gateway-latency-ms"] >= 0
+
+    def test_a_model_without_a_listed_price_has_no_cost(self, client, provider, redis_mocks):
+        body = _post(client, model="unpriced-model", messages=MESSAGES).json()
+        assert body["x-gateway-cost-usd"] is None
+
+    def test_a_cache_hit_is_free_and_does_not_call_the_provider(self, client, provider, redis_mocks):
+        first = _post(client, model="claude-haiku-4-5", messages=MESSAGES).json()
+        with patch.object(main_module.get_cache(), "get", return_value=first):
+            hit = _post(client, model="claude-haiku-4-5", messages=MESSAGES).json()
+        assert hit["x-gateway-cache"] == "hit"
+        assert hit["x-gateway-cost-usd"] == 0.0
+        assert hit["x-gateway-provider"] == "anthropic"
+        assert hit["id"] == first["id"]
+        assert provider.complete.await_count == 1
+        # The stored entry is not rewritten by serving a hit.
+        assert first["x-gateway-cache"] == "miss"
+
+    def test_a_disabled_cache_is_reported_as_disabled(self, client, provider, redis_mocks):
+        with patch("src.api.routes.completions.settings", MagicMock(cache_enabled=False)):
+            body = _post(client, model="claude-haiku-4-5", messages=MESSAGES).json()
+        assert body["x-gateway-cache"] == "disabled"
+
+
 class TestExperimentTenantIsolation:
     """Experiments belong to the API key that created them."""
 
