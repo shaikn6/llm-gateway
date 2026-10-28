@@ -8,7 +8,7 @@
 [![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker)](docker-compose.yml)
-[![Tests](https://img.shields.io/badge/tests-415%20passing-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-424%20passing-brightgreen)](tests/)
 [![Coverage](https://img.shields.io/badge/coverage-99%25-brightgreen)](tests/)
 
 **A single OpenAI-compatible endpoint in front of Anthropic, OpenAI, and local Ollama models — with exact-match response caching, sliding-window rate limiting, deterministic A/B routing, and per-key cost tracking, all backed by Redis.**
@@ -135,7 +135,7 @@ Stop the three background processes with `kill %1 %2 %3`.
 To use the real providers, set real `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` values and leave `ANTHROPIC_BASE_URL` unset. Nothing in this repository's tests or CI calls a live provider API, so that path is exercised only through the real SDK request code against a fake transport.
 
 ```bash
-.venv/bin/pytest --cov=src --cov-report=term-missing --cov-fail-under=95   # 415 passed, 99% line coverage
+.venv/bin/pytest --cov=src --cov-report=term-missing --cov-fail-under=95   # 424 passed, 99% line coverage
 .venv/bin/ruff check src/ tests/                                           # lint (CI-gated; mypy is unpinned/advisory, not CI-gated)
 ```
 
@@ -153,7 +153,7 @@ Configuration is environment-driven (`.env`, see `.env.example`):
 
 ## Testing
 
-`pytest` collects **415 tests** (381 test functions, some parametrized) across 19 files in `tests/`. Line coverage on `src/` is 99% (`pytest --cov=src --cov-report=term-missing`; CI fails under 95%). Redis is mocked throughout, and no test opens a network connection.
+`pytest` collects **424 tests** (389 test functions, some parametrized) across 20 files in `tests/`. Line coverage on `src/` is 99% (`pytest --cov=src --cov-report=term-missing`; CI fails under 95%). Redis is mocked throughout, and no test opens a network connection.
 
 Beyond the provider adapters, the A/B bucketing math, the sliding-window limiter, usage/cost aggregation and the audit log, the suite pins down the behaviours that are easy to get wrong:
 
@@ -165,11 +165,11 @@ Beyond the provider adapters, the A/B bucketing math, the sliding-window limiter
 ## Deployment
 
 - **Docker Compose** — `docker-compose.yml` runs the gateway plus `redis:7-alpine`; Redis has a healthcheck and the gateway waits for it (`depends_on: condition: service_healthy`). The image has a `HEALTHCHECK` on `/health`. Copy `.env.example` to `.env` and set `API_KEYS` first — it ships empty and the container exits until it is set. The compose file is validated with `docker compose config`; the image build runs in CI (`docker-build` job).
-- **Kubernetes** — manifests in `k8s/` (namespace, network policy) and a Helm chart in `helm/llm-gateway/` (deployment, HPA, ingress, service, Redis, secrets). **No image is published for the chart** — CI builds the image but does not push it, so `image.repository` in `values.yaml` is a placeholder: build and push your own image and set `image.repository` (and `image.tag`, which defaults to the chart's `appVersion`). The chart reads the client keys from the `gateway-api-keys` entry of its Secret (`externalSecrets.remoteRefs.gatewayApiKeys`); pods will not start without it. The chart passes `helm lint` and renders with `helm template`; it has not been installed on a cluster as part of this repo's checks.
+- **Kubernetes** — manifests in `k8s/` (namespace, network policy) and a Helm chart in `helm/llm-gateway/` (deployment, HPA, ingress, service, Redis, secrets). **No image is published for the chart** — CI builds the image but does not push it, so `image.repository` in `values.yaml` is a placeholder: build and push your own image and set `image.repository` (and `image.tag`, which defaults to the chart's `appVersion`). The chart reads the client keys from the `gateway-api-keys` entry of its Secret (`externalSecrets.remoteRefs.gatewayApiKeys`); pods will not start without it. The chart passes `helm lint` and renders with `helm template` once its Redis dependency is fetched (`helm dependency build helm/llm-gateway` first); it has not been installed on a cluster as part of this repo's checks.
 
 ## API Reference
 
-[![OpenAPI](https://img.shields.io/badge/OpenAPI-3.0-6BA539?logo=openapi-initiative&logoColor=white)](http://localhost:8000/docs)
+[![OpenAPI](https://img.shields.io/badge/OpenAPI-3.1-6BA539?logo=openapi-initiative&logoColor=white)](http://localhost:8000/docs)
 [![Swagger UI](https://img.shields.io/badge/Swagger_UI-docs-85EA2D?logo=swagger&logoColor=black)](http://localhost:8000/docs)
 [![ReDoc](https://img.shields.io/badge/ReDoc-redoc-8A2BE2)](http://localhost:8000/redoc)
 
@@ -184,7 +184,7 @@ Interactive docs: `http://localhost:8000/docs` (Swagger UI) · `http://localhost
 | `POST` | `/v1/experiments` | `X-API-Key` | Create a new A/B experiment (in-memory; `traffic_pct` must sum to 100) |
 | `GET` | `/v1/experiments/{experiment_id}/assignment` | `X-API-Key` | Get model assignment for a user |
 
-`/v1/chat/completions` accepts `model`, `messages` (at least one), `max_tokens` (default 1024), `temperature`, `top_p`, `stop`, and `stream: false`. Optionally `experiment` (an experiment id) with `user` (the bucketing key, default `"default"`): the experiment's assignment, the same one `/v1/experiments/{id}/assignment` returns, replaces `model`, an unknown id is a `404`, and the response gains `x-gateway-experiment` and `x-gateway-variant`. Every other field — including `stream: true`, `tools`, `tool_choice`, `response_format`, `n` — is rejected with a `422` that names it. Status codes: `200`, `401` (bad or missing key), `422` (invalid request), `429` (over quota), `502` (upstream error), `503` (rate limiter unavailable), `504` (upstream timeout).
+`/v1/chat/completions` accepts `model`, `messages` (at least one), `max_tokens` (default 1024), `temperature`, `top_p`, `stop`, and `stream: false`. Optionally `experiment` (an experiment id) with `user` (the bucketing key, default `"default"`): the experiment's assignment, the same one `/v1/experiments/{id}/assignment` returns, replaces `model`, an unknown id is a `404`, and the response body gains `x-gateway-experiment` and `x-gateway-variant` fields (they are JSON fields, not HTTP headers). Every other field — including `stream: true`, `tools`, `tool_choice`, `response_format`, `n` — is rejected with a `422` that names it. Status codes: `200`, `401` (bad or missing key), `422` (invalid request), `429` (over quota), `502` (upstream error), `503` (rate limiter unavailable), `504` (upstream timeout).
 
 Auth is enforced on every protected route — a request with a missing or unrecognized `X-API-Key` is rejected before it reaches the router, cache, or rate limiter:
 
