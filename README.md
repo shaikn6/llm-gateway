@@ -1,21 +1,20 @@
 <p align="center"><img src=".github/banner.png" alt="llm-gateway" width="100%"></p>
 
-<div align="center">
+# llm-gateway
 
-# LLM Gateway
-
-[![CI](https://github.com/shaikn6/llm-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/shaikn6/llm-gateway/actions)
-[![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python)](https://python.org)
+[![CI](https://github.com/shaikn6/llm-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/shaikn6/llm-gateway/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker)](docker-compose.yml)
-[![Tests](https://img.shields.io/badge/tests-428%20passing-brightgreen)](tests/)
-[![Coverage](https://img.shields.io/badge/coverage-99%25-brightgreen)](tests/)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
 
-**A single OpenAI-compatible endpoint in front of Anthropic, OpenAI, and local Ollama models — with exact-match response caching, sliding-window rate limiting, deterministic A/B routing, and per-key cost tracking, all backed by Redis.**
-
-</div>
+**One OpenAI-compatible chat endpoint in front of Anthropic, OpenAI and local Ollama models, with exact-match response caching, sliding-window rate limiting, deterministic A/B routing and per-key cost tracking, backed by Redis.**
 
 Instead of calling provider SDKs directly, send OpenAI-shaped chat-completion requests to the gateway and get vendor abstraction, response caching, rate limiting, traffic-split experiments, and token/cost accounting in one place. It is deliberately a subset of the OpenAI API: non-streaming chat completions only, authenticated with an `X-API-Key` header (an OpenAI SDK client needs that header added; `Authorization: Bearer` is not read).
+
+The [Quickstart](#quickstart) runs the whole path offline against a fake upstream (no provider keys, no cost) and shows a cache hit, a cache miss, a `422` and a `401` in six requests. The suite has 428 tests at 99% line coverage, including contract tests that bind each provider's request against the real installed `anthropic` / `openai` SDK signatures.
+
+## Why this exists
+
+Every team that calls more than one LLM provider ends up rebuilding the same layer: key management, a cache so identical prompts are not paid for twice, a rate limit so one caller cannot run up the bill, and a record of who spent what. This repository is that layer kept small enough to read in one sitting, with each concern in its own module and a stated behaviour for every failure (Redis down, provider down, unsupported request field).
 
 ## Architecture
 
@@ -53,42 +52,7 @@ All Redis-backed components (cache, rate limiter, usage tracker) share one Redis
 
 Because all three share one Redis, a full outage is seen by callers as the limiter's `503`; the cache and usage paths matter when only those calls fail. `/health` and the `401` for a bad key do not touch Redis. The Redis clients use redis-py's default socket timeouts, so an unreachable-but-not-refusing Redis (a black-holed network path) is not bounded by the gateway yet.
 
-## How it works
-
-The gateway is deliberately small and composable. Each concern is an isolated module so it can be tested, swapped, or disabled in isolation.
-
-- **Provider abstraction (`src/providers/`).** `LLMProvider` is an `ABC` defining `complete()`, `stream()`, `list_models()`, and `health_check()`. Concrete providers (`AnthropicProvider`, `OpenAIProvider`, `OllamaProvider`) translate the OpenAI-style request/response into each vendor's native format — including system-prompt extraction, tool-call mapping, and the user/assistant alternation Anthropic requires. Upstream failures are normalized into a typed error hierarchy (`ProviderAuthError`, `ProviderRateLimitError`, `ProviderTimeoutError`, all `ProviderError`). `/v1/chat/completions` maps them to gateway statuses: an upstream timeout is `504`, any other upstream failure (4xx, 5xx, bad or missing provider credentials) is `502`, and anything unexpected is `500`. The response body is always a fixed generic message — the upstream status and exception type go to the log, the exception text goes nowhere.
-
-  Sampling parameters are forwarded only when the caller set them. `anthropic` 1.x removed `temperature` / `top_p` from `messages.create()`, so for Anthropic they are sent through the SDK's `extra_body` (the SDK's documented path for models that still honour them); whether a given Claude model accepts them is decided upstream and has not been tested here against the live API. `tests/test_sdk_contract.py` binds the exact kwargs each provider builds against the real installed SDK signatures, so a removed or renamed SDK parameter fails CI instead of failing every request in production.
-
-- **Routing (`src/gateway/router.py`).** `GatewayRouter` selects a provider by model-name prefix: `ollama/*` → a local Ollama instance (`OLLAMA_BASE_URL`, default `http://localhost:11434`), `gpt*`/`o1*` → OpenAI, otherwise Anthropic. The `ollama/` namespace is explicit (same convention LiteLLM and other multi-provider gateways use) so an unrecognized model name still falls back to Anthropic rather than silently trying a local Ollama instance that may not be running. The OpenAI and Ollama clients are both lazily constructed so an Anthropic-only deployment never needs an OpenAI key or a running Ollama instance. All three providers (`AnthropicProvider`, `OpenAIAsyncProvider`, `OllamaProvider`) implement the same async `LLMProvider.complete(request: ChatCompletionRequest)` contract, and `/v1/chat/completions` awaits it directly — there is a single OpenAI provider implementation (`src/providers/openai.py`); the older, incompatible synchronous one has been removed.
-
-- **Auth and rate limiting (`src/api/deps.py`).** Every request to `/v1/chat/completions` and `/v1/experiments/*` requires a valid `X-API-Key` header, checked against `API_KEYS` (comma-separated). There is no default key: with `API_KEYS` empty the process refuses to start, unless `GATEWAY_DEV_MODE=true` is set, which accepts the built-in `dev-key-1` / `dev-key-2` for local work. A valid key is then passed through the sliding-window `RateLimiter`; requests over the configured quota get `429`, and `503` if the limiter's Redis is unreachable.
-
-- **Audit logging (`src/middleware/audit.py`).** `AuditMiddleware` emits one structured JSON line per request — `request_id` (reused from an inbound `X-Request-Id` or generated), method, path, status, latency, client IP, and a SHA-256 fingerprint of the API key. Prompt and completion content are never logged, at any level. `configure_logging()` routes the root logger through a single JSON handler on stdout, ready for Loki / CloudWatch without a parser.
-
-- **Deterministic A/B testing (`src/gateway/ab_router.py`).** Assignment is `MD5(experiment_id + user_id) % 100`, walked against cumulative `traffic_pct` buckets. Because it's a pure hash of stable inputs, the same user always lands in the same variant across requests and restarts — no assignment state to store or sync. The experiment *definitions* are a different matter: they live in process memory only, so they are lost on restart and are not shared between workers or replicas. Variant `traffic_pct` values must be integers in 0–100 that sum to exactly 100; anything else is a `422`.
-
-- **Response caching (`src/cache/semantic_cache.py`).** An exact-match cache, not a semantic one — the `SemanticCache` class name is historical and there are no embeddings or similarity search. The key is a `SHA-256` over the canonicalized (`sort_keys`) request — provider, model, messages, `max_tokens`, `temperature`, `top_p`, `stop` — prefixed with a fingerprint of the caller's API key, stored in Redis with a configurable TTL. A hit therefore needs the same caller sending a byte-identical request; a different model, parameter, or API key is a miss, and one caller can never be served another's cached answer.
-
-- **Rate limiting (`src/middleware/rate_limiter.py`).** A true sliding window built on Redis sorted sets: each request is a `ZADD` with a timestamp score, expired entries are trimmed with `ZREMRANGEBYSCORE`, and the live `ZCARD` is compared to the limit. Trim, count and record run as one Lua script, so concurrent requests cannot oversubscribe the window, and a denied request records nothing.
-
-- **Cost accounting (`src/middleware/usage_tracker.py`).** Per-key token usage is pushed to a Redis list; `get_usage()` aggregates input/output tokens and computes USD cost from a per-model price table (`COST_PER_1M`), broken down by model.
-
-### Design decisions
-
-| Decision | Rationale |
-|----------|-----------|
-| Hash-based cache key (not embeddings) | Exact-match caching is deterministic, dependency-free, and avoids false-positive cache hits on semantically-similar-but-different prompts. |
-| MD5 bucketing for A/B | Stateless, reproducible assignment; no database, consistent across restarts. |
-| Redis sorted-set rate limiter | Real sliding window (not fixed buckets), one atomic Lua script (single round trip) per request. |
-| Typed provider error hierarchy, generic client errors | Vendor errors are distinguishable in code and logs by type and upstream status; callers only ever see `502` / `504` with a fixed message, so upstream error text cannot leak through the gateway. |
-| Reject unsupported request fields | `stream`, `tools`, and any other field the gateway does not forward are a `422` naming the field, rather than being accepted and silently dropped. |
-| Fail closed when the limiter's Redis is down | See the outage table above. |
-| Multi-stage Dockerfile, non-root user | Smaller production image, no build toolchain or root in the runtime layer. |
-| Metadata-only audit log (JSON, one line/request) | Full request accounting for operators without ever persisting prompt or completion content — the sensitive surface for an LLM gateway. |
-
-## Quick Start
+## Quickstart
 
 This runs the gateway natively against a local Redis and `scripts/fake_upstream.py`, a standard-library stand-in for the Anthropic and OpenAI APIs — no provider keys, no network calls, no cost. Needs Python 3.11+ and `redis-server` on the `PATH`.
 
@@ -151,6 +115,41 @@ Configuration is environment-driven (`.env`, see `.env.example`):
 | `CACHE_ENABLED` | `true` | |
 | `LOG_LEVEL` | `INFO` | |
 
+## How it works
+
+The gateway is deliberately small and composable. Each concern is an isolated module so it can be tested, swapped, or disabled in isolation.
+
+- **Provider abstraction (`src/providers/`).** `LLMProvider` is an `ABC` defining `complete()`, `stream()`, `list_models()`, and `health_check()`. Concrete providers (`AnthropicProvider`, `OpenAIProvider`, `OllamaProvider`) translate the OpenAI-style request/response into each vendor's native format — including system-prompt extraction, tool-call mapping, and the user/assistant alternation Anthropic requires. Upstream failures are normalized into a typed error hierarchy (`ProviderAuthError`, `ProviderRateLimitError`, `ProviderTimeoutError`, all `ProviderError`). `/v1/chat/completions` maps them to gateway statuses: an upstream timeout is `504`, any other upstream failure (4xx, 5xx, bad or missing provider credentials) is `502`, and anything unexpected is `500`. The response body is always a fixed generic message — the upstream status and exception type go to the log, the exception text goes nowhere.
+
+  Sampling parameters are forwarded only when the caller set them. `anthropic` 1.x removed `temperature` / `top_p` from `messages.create()`, so for Anthropic they are sent through the SDK's `extra_body` (the SDK's documented path for models that still honour them); whether a given Claude model accepts them is decided upstream and has not been tested here against the live API. `tests/test_sdk_contract.py` binds the exact kwargs each provider builds against the real installed SDK signatures, so a removed or renamed SDK parameter fails CI instead of failing every request in production.
+
+- **Routing (`src/gateway/router.py`).** `GatewayRouter` selects a provider by model-name prefix: `ollama/*` → a local Ollama instance (`OLLAMA_BASE_URL`, default `http://localhost:11434`), `gpt*`/`o1*` → OpenAI, otherwise Anthropic. The `ollama/` namespace is explicit (same convention LiteLLM and other multi-provider gateways use) so an unrecognized model name still falls back to Anthropic rather than silently trying a local Ollama instance that may not be running. The OpenAI and Ollama clients are both lazily constructed so an Anthropic-only deployment never needs an OpenAI key or a running Ollama instance. All three providers (`AnthropicProvider`, `OpenAIAsyncProvider`, `OllamaProvider`) implement the same async `LLMProvider.complete(request: ChatCompletionRequest)` contract, and `/v1/chat/completions` awaits it directly — there is a single OpenAI provider implementation (`src/providers/openai.py`); the older, incompatible synchronous one has been removed.
+
+- **Auth and rate limiting (`src/api/deps.py`).** Every request to `/v1/chat/completions` and `/v1/experiments/*` requires a valid `X-API-Key` header, checked against `API_KEYS` (comma-separated). There is no default key: with `API_KEYS` empty the process refuses to start, unless `GATEWAY_DEV_MODE=true` is set, which accepts the built-in `dev-key-1` / `dev-key-2` for local work. A valid key is then passed through the sliding-window `RateLimiter`; requests over the configured quota get `429`, and `503` if the limiter's Redis is unreachable.
+
+- **Audit logging (`src/middleware/audit.py`).** `AuditMiddleware` emits one structured JSON line per request — `request_id` (reused from an inbound `X-Request-Id` or generated), method, path, status, latency, client IP, and a SHA-256 fingerprint of the API key. Prompt and completion content are never logged, at any level. `configure_logging()` routes the root logger through a single JSON handler on stdout, ready for Loki / CloudWatch without a parser.
+
+- **Deterministic A/B testing (`src/gateway/ab_router.py`).** Assignment is `MD5(experiment_id + user_id) % 100`, walked against cumulative `traffic_pct` buckets. Because it's a pure hash of stable inputs, the same user always lands in the same variant across requests and restarts — no assignment state to store or sync. The experiment *definitions* are a different matter: they live in process memory only, so they are lost on restart and are not shared between workers or replicas. Variant `traffic_pct` values must be integers in 0–100 that sum to exactly 100; anything else is a `422`.
+
+- **Response caching (`src/cache/semantic_cache.py`).** An exact-match cache, not a semantic one — the `SemanticCache` class name is historical and there are no embeddings or similarity search. The key is a `SHA-256` over the canonicalized (`sort_keys`) request — provider, model, messages, `max_tokens`, `temperature`, `top_p`, `stop` — prefixed with a fingerprint of the caller's API key, stored in Redis with a configurable TTL. A hit therefore needs the same caller sending a byte-identical request; a different model, parameter, or API key is a miss, and one caller can never be served another's cached answer.
+
+- **Rate limiting (`src/middleware/rate_limiter.py`).** A true sliding window built on Redis sorted sets: each request is a `ZADD` with a timestamp score, expired entries are trimmed with `ZREMRANGEBYSCORE`, and the live `ZCARD` is compared to the limit. Trim, count and record run as one Lua script, so concurrent requests cannot oversubscribe the window, and a denied request records nothing.
+
+- **Cost accounting (`src/middleware/usage_tracker.py`).** Per-key token usage is pushed to a Redis list; `get_usage()` aggregates input/output tokens and computes USD cost from a per-model price table (`COST_PER_1M`), broken down by model.
+
+### Design decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| Hash-based cache key (not embeddings) | Exact-match caching is deterministic, dependency-free, and avoids false-positive cache hits on semantically-similar-but-different prompts. |
+| MD5 bucketing for A/B | Stateless, reproducible assignment; no database, consistent across restarts. |
+| Redis sorted-set rate limiter | Real sliding window (not fixed buckets), one atomic Lua script (single round trip) per request. |
+| Typed provider error hierarchy, generic client errors | Vendor errors are distinguishable in code and logs by type and upstream status; callers only ever see `502` / `504` with a fixed message, so upstream error text cannot leak through the gateway. |
+| Reject unsupported request fields | `stream`, `tools`, and any other field the gateway does not forward are a `422` naming the field, rather than being accepted and silently dropped. |
+| Fail closed when the limiter's Redis is down | See the outage table above. |
+| Multi-stage Dockerfile, non-root user | Smaller production image, no build toolchain or root in the runtime layer. |
+| Metadata-only audit log (JSON, one line/request) | Full request accounting for operators without ever persisting prompt or completion content — the sensitive surface for an LLM gateway. |
+
 ## Testing
 
 `pytest` collects **428 tests** (393 test functions, some parametrized) across 20 files in `tests/`. Line coverage on `src/` is 99% (`pytest --cov=src --cov-report=term-missing`; CI fails under 95%). Redis is mocked throughout, and no test opens a network connection.
@@ -168,10 +167,6 @@ Beyond the provider adapters, the A/B bucketing math, the sliding-window limiter
 - **Kubernetes** — manifests in `k8s/` (namespace, network policy) and a Helm chart in `helm/llm-gateway/` (deployment, HPA, ingress, service, Redis, secrets). **No image is published for the chart** — CI builds the image but does not push it, so `image.repository` in `values.yaml` is a placeholder: build and push your own image and set `image.repository` (and `image.tag`, which defaults to the chart's `appVersion`). The chart reads the client keys from the `gateway-api-keys` entry of its Secret (`externalSecrets.remoteRefs.gatewayApiKeys`); pods will not start without it. The chart passes `helm lint` and renders with `helm template` once its Redis dependency is fetched (`helm dependency build helm/llm-gateway` first); it has not been installed on a cluster as part of this repo's checks.
 
 ## API Reference
-
-[![OpenAPI](https://img.shields.io/badge/OpenAPI-3.1-6BA539?logo=openapi-initiative&logoColor=white)](http://localhost:8000/docs)
-[![Swagger UI](https://img.shields.io/badge/Swagger_UI-docs-85EA2D?logo=swagger&logoColor=black)](http://localhost:8000/docs)
-[![ReDoc](https://img.shields.io/badge/ReDoc-redoc-8A2BE2)](http://localhost:8000/redoc)
 
 Interactive docs: `http://localhost:8000/docs` (Swagger UI) · `http://localhost:8000/redoc` (ReDoc)
 
@@ -271,6 +266,14 @@ do not open a public issue.
 ## Tech stack
 
 Python 3.11 · FastAPI · Pydantic v2 · Redis (cache / rate limiter / usage) · `anthropic` & `openai` SDKs · Uvicorn · pytest · ruff · mypy · Docker · Helm / Kubernetes.
+
+## What I would improve next
+
+- Per-key spend caps enforced at request time, not only measured after the fact.
+- Pass a provider's `429` and its `Retry-After` through to the caller instead of a generic `502`.
+- Streaming and tool-call support, so OpenAI SDK clients can use the gateway without changing request shape.
+- Persist A/B experiment definitions (today they live in process memory and are lost on restart) and bound Redis socket timeouts so a black-holed Redis cannot stall requests.
+- Short-lived, scoped API keys with rotation instead of a static environment allowlist.
 
 ## License
 
