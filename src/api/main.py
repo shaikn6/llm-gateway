@@ -14,12 +14,14 @@ from src.cache.semantic_cache import SemanticCache
 from src.config import settings
 from src.gateway.router import GatewayRouter
 from src.middleware.audit import AuditMiddleware, configure_logging
+from src.middleware.body_limit import MaxBodySizeMiddleware
 from src.middleware.usage_tracker import UsageTracker
 
 configure_logging()
 
 app = FastAPI(title="LLM Gateway", version=__version__)
 app.add_middleware(AuditMiddleware)
+app.add_middleware(MaxBodySizeMiddleware, max_bytes=settings.max_body_bytes)
 app.include_router(completions_router)
 app.include_router(experiments_router)
 app.include_router(usage_router)

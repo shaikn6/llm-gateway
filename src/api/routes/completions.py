@@ -12,7 +12,7 @@ from src.api.deps import require_api_key
 from src.api.routes.experiments import tenant_ab_router
 from src.config import settings
 from src.middleware.usage_tracker import request_cost_usd
-from src.models.schemas import ChatCompletionRequest, ChatMessage
+from src.models.schemas import MAX_OUTPUT_TOKENS, ChatCompletionRequest, ChatMessage
 from src.providers.base import ProviderError, ProviderTimeoutError
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,7 @@ class CompletionRequest(BaseModel):
 
     model: str = "claude-haiku-4-5"
     messages: list[ChatMessage] = Field(min_length=1)
-    max_tokens: int = Field(default=1024, ge=1)
+    max_tokens: int = Field(default=1024, ge=1, le=MAX_OUTPUT_TOKENS)
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     top_p: float | None = Field(default=None, ge=0.0, le=1.0)
     stop: str | list[str] | None = None
