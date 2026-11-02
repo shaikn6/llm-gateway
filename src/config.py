@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     cache_ttl_s: int = 3600
     rate_limit_requests: int = 100
     rate_limit_window_s: int = 60
+    max_body_bytes: int = 10 * 1024 * 1024
     api_keys: str = ""
     gateway_dev_mode: bool = False
     log_level: str = "INFO"

@@ -9,6 +9,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+# Hard ceiling on a caller's requested completion length. Any current model's
+# max output fits well under this; the bound just stops absurd values.
+MAX_OUTPUT_TOKENS = 200_000
+
 # ---------------------------------------------------------------------------
 # OpenAI-compatible request models
 # ---------------------------------------------------------------------------
@@ -47,8 +51,10 @@ class ChatCompletionRequest(BaseModel):
     stream: bool | None = False
     stream_options: StreamOptions | None = None
     stop: str | list[str] | None = None
-    max_tokens: int | None = Field(default=None, ge=1)
-    max_completion_tokens: int | None = Field(default=None, ge=1)
+    # Upper-bounded so an absurd value cannot be forwarded upstream to drive
+    # unbounded cost/latency; 200k comfortably exceeds any current model's cap.
+    max_tokens: int | None = Field(default=None, ge=1, le=MAX_OUTPUT_TOKENS)
+    max_completion_tokens: int | None = Field(default=None, ge=1, le=MAX_OUTPUT_TOKENS)
     presence_penalty: float | None = Field(default=0.0, ge=-2.0, le=2.0)
     frequency_penalty: float | None = Field(default=0.0, ge=-2.0, le=2.0)
     logit_bias: dict[str, float] | None = None
