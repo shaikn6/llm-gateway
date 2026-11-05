@@ -37,12 +37,14 @@ def get_router() -> GatewayRouter:
 
 @lru_cache(maxsize=1)
 def get_cache() -> SemanticCache:
-    return SemanticCache(redis_url=settings.redis_url, ttl_s=settings.cache_ttl_s)
+    return SemanticCache(
+        redis_url=settings.redis_url, ttl_s=settings.cache_ttl_s, timeout_s=settings.redis_timeout_s
+    )
 
 
 @lru_cache(maxsize=1)
 def get_usage_tracker() -> UsageTracker:
-    return UsageTracker(redis_url=settings.redis_url)
+    return UsageTracker(redis_url=settings.redis_url, timeout_s=settings.redis_timeout_s)
 
 
 @app.get("/health")

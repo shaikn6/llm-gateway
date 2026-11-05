@@ -20,6 +20,7 @@ def get_rate_limiter() -> RateLimiter:
         redis_url=settings.redis_url,
         limit=settings.rate_limit_requests,
         window_s=settings.rate_limit_window_s,
+        timeout_s=settings.redis_timeout_s,
     )
 
 

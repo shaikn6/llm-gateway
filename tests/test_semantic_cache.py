@@ -164,7 +164,10 @@ class TestSemanticCacheInit:
             mock_from_url.return_value = MagicMock()
             SemanticCache(redis_url="redis://myhost:6380/1")
         mock_from_url.assert_called_once_with(
-            "redis://myhost:6380/1", decode_responses=True
+            "redis://myhost:6380/1",
+            decode_responses=True,
+            socket_connect_timeout=2.0,
+            socket_timeout=2.0,
         )
 
 

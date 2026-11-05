@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     ollama_base_url: str = "http://localhost:11434"
     redis_url: str = "redis://localhost:6379/0"
+    redis_timeout_s: float = 2.0
     cache_enabled: bool = True
     cache_ttl_s: int = 3600
     rate_limit_requests: int = 100

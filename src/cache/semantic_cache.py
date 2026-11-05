@@ -16,8 +16,15 @@ logger = logging.getLogger(__name__)
 
 
 class SemanticCache:
-    def __init__(self, redis_url: str = "redis://localhost:6379/0", ttl_s: int = 3600):
-        self._redis = redis.from_url(redis_url, decode_responses=True)
+    def __init__(
+        self, redis_url: str = "redis://localhost:6379/0", ttl_s: int = 3600, timeout_s: float = 2.0
+    ):
+        self._redis = redis.from_url(
+            redis_url,
+            decode_responses=True,
+            socket_connect_timeout=timeout_s,
+            socket_timeout=timeout_s,
+        )
         self._ttl = ttl_s
 
     def _key(self, request: dict | list, *, tenant: str) -> str:
