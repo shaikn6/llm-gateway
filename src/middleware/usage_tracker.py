@@ -29,8 +29,13 @@ def request_cost_usd(model: str, prompt_tokens: int, completion_tokens: int) -> 
 
 
 class UsageTracker:
-    def __init__(self, redis_url: str = "redis://localhost:6379/0"):
-        self._redis = redis.from_url(redis_url, decode_responses=True)
+    def __init__(self, redis_url: str = "redis://localhost:6379/0", timeout_s: float = 2.0):
+        self._redis = redis.from_url(
+            redis_url,
+            decode_responses=True,
+            socket_connect_timeout=timeout_s,
+            socket_timeout=timeout_s,
+        )
 
     def record(self, api_key: str, model: str, prompt_tokens: int, completion_tokens: int) -> None:
         entry = json.dumps(

@@ -34,8 +34,11 @@ class RateLimiter:
         redis_url: str = "redis://localhost:6379/0",
         limit: int = 100,
         window_s: int = 60,
+        timeout_s: float = 2.0,
     ):
-        self._redis = redis.from_url(redis_url)
+        self._redis = redis.from_url(
+            redis_url, socket_connect_timeout=timeout_s, socket_timeout=timeout_s
+        )
         self._limit = limit
         self._window = window_s
 

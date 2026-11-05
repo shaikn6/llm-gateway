@@ -13,6 +13,11 @@ class TestSettings:
         s = Settings(_env_file=None)
         assert s.redis_url == "redis://localhost:6379/0"
 
+    def test_default_redis_timeout(self):
+        from src.config import Settings
+        s = Settings(_env_file=None)
+        assert s.redis_timeout_s == 2.0
+
     def test_default_cache_enabled(self):
         from src.config import Settings
         s = Settings(_env_file=None)
