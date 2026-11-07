@@ -19,6 +19,7 @@ from starlette.requests import Request
 from starlette.types import ASGIApp
 
 from src.config import settings
+from src.middleware.metrics import metrics
 
 _AUDIT_LOGGER = "llm_gateway.audit"
 
@@ -68,6 +69,17 @@ class AuditMiddleware(BaseHTTPMiddleware):
             status_code = response.status_code
             return response
         finally:
+            elapsed_ms = (time.perf_counter() - started) * 1000
+            # Count by the route template, not the raw path, so unbounded URLs
+            # (and 404s) collapse to one series instead of exploding cardinality.
+            route = request.scope.get("route")
+            metrics.observe_request(
+                getattr(route, "path", "unrouted"), request.method, status_code, elapsed_ms
+            )
+            if status_code == 429:
+                metrics.inc("llm_gateway_rate_limited_total")
+            elif status_code == 503:
+                metrics.inc("llm_gateway_unavailable_total")
             self._log.info(
                 "request",
                 extra={
@@ -76,7 +88,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
                         "method": request.method,
                         "path": request.url.path,
                         "status": status_code,
-                        "latency_ms": round((time.perf_counter() - started) * 1000, 1),
+                        "latency_ms": round(elapsed_ms, 1),
                         "client": request.client.host if request.client else None,
                         "api_key": key_fingerprint(api_key) if api_key else None,
                     }

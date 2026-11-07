@@ -173,6 +173,7 @@ Interactive docs: `http://localhost:8000/docs` (Swagger UI) · `http://localhost
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
 | `GET` | `/health` | — | Health check — returns service version |
+| `GET` | `/metrics` | — | Prometheus metrics (text format): requests by route and status, a request-latency histogram, cache hit/miss, rate-limited (`429`) and unavailable (`503`) counts, and per-model tokens and USD cost |
 | `POST` | `/v1/chat/completions` | `X-API-Key` | Chat completions in the OpenAI request/response shape (routes to Anthropic, OpenAI, or Ollama). Non-streaming only. |
 | `GET` | `/v1/usage` | `X-API-Key` | Token and USD cost totals recorded for the calling key (last 24 h), broken down by model |
 | `GET` | `/v1/experiments` | `X-API-Key` | List all A/B experiments |

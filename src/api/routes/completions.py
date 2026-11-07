@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from src.api.deps import require_api_key
 from src.api.routes.experiments import tenant_ab_router
 from src.config import settings
+from src.middleware.metrics import metrics
 from src.middleware.usage_tracker import request_cost_usd
 from src.models.schemas import MAX_OUTPUT_TOKENS, ChatCompletionRequest, ChatMessage
 from src.providers.base import ProviderError, ProviderTimeoutError
@@ -94,6 +95,7 @@ async def create_completion(
         if cache is not None:
             cached = cache.get(cache_request, tenant=api_key)
             if cached is not None:
+                metrics.inc("llm_gateway_cache_total", result="hit")
                 # Nothing was sent upstream, so nothing was billed for this call.
                 return {
                     **cached,
@@ -101,6 +103,7 @@ async def create_completion(
                     "x-gateway-cost-usd": 0.0,
                     "x-gateway-latency-ms": round((time.perf_counter() - started) * 1000),
                 }
+            metrics.inc("llm_gateway_cache_total", result="miss")
 
         response = await provider.complete(chat_request)
     except ProviderTimeoutError as e:
@@ -119,12 +122,20 @@ async def create_completion(
         logger.error("unexpected completion failure type=%s", type(e).__name__)
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
+    prompt_tokens = response.usage.prompt_tokens
+    completion_tokens = response.usage.completion_tokens
+    cost_usd = request_cost_usd(model, prompt_tokens, completion_tokens)
+
+    # Same per-model counts the UsageTracker records below, also exposed on /metrics.
+    metrics.inc("llm_gateway_model_tokens_total", prompt_tokens, model=model, type="prompt")
+    metrics.inc("llm_gateway_model_tokens_total", completion_tokens, model=model, type="completion")
+    if cost_usd is not None:
+        metrics.inc("llm_gateway_model_cost_usd_total", cost_usd, model=model)
+
     response_dict = response.model_dump(by_alias=True)
     response_dict["x-gateway-provider"] = provider.name
     response_dict["x-gateway-cache"] = "miss" if cache is not None else "disabled"
-    response_dict["x-gateway-cost-usd"] = request_cost_usd(
-        model, response.usage.prompt_tokens, response.usage.completion_tokens
-    )
+    response_dict["x-gateway-cost-usd"] = cost_usd
     response_dict["x-gateway-latency-ms"] = round((time.perf_counter() - started) * 1000)
     if req.experiment is not None:
         response_dict["x-gateway-experiment"] = req.experiment
@@ -137,8 +148,8 @@ async def create_completion(
         get_usage_tracker().record,
         api_key,
         model,
-        response.usage.prompt_tokens,
-        response.usage.completion_tokens,
+        prompt_tokens,
+        completion_tokens,
     )
 
     return response_dict
