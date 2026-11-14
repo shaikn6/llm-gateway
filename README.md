@@ -2,6 +2,8 @@
 
 # llm-gateway
 
+> **One OpenAI-compatible endpoint for Anthropic, OpenAI and Ollama, with response caching, A/B routing and cost tracking.**
+
 [![CI](https://github.com/shaikn6/llm-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/shaikn6/llm-gateway/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
