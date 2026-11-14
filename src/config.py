@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     redis_timeout_s: float = 2.0
     cache_enabled: bool = True
     cache_ttl_s: int = 3600
+    semantic_cache_enabled: bool = False
+    semantic_cache_threshold: float = 0.9997357130050659
+    semantic_cache_path: str = "./.semantic_cache"
+    semantic_cache_max_entries_per_tenant: int = 10000
+    cache_version: str = "1"
     rate_limit_requests: int = 100
     rate_limit_window_s: int = 60
     max_body_bytes: int = 10 * 1024 * 1024

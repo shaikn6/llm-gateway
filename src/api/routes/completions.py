@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 
@@ -59,20 +60,28 @@ class CompletionRequest(BaseModel):
         return v
 
 
+def cache_hit(cached, kind, started, **extra):
+    return {
+        **cached,
+        "x-gateway-cache": kind,
+        "x-gateway-cost-usd": 0.0,
+        "x-gateway-latency-ms": round((time.perf_counter() - started) * 1000),
+        **extra,
+    }
+
+
 @router.post("/v1/chat/completions")
 async def create_completion(
     req: CompletionRequest,
     background_tasks: BackgroundTasks,
     api_key: str = Depends(require_api_key),
 ):
-    from src.api.main import get_cache, get_router, get_usage_tracker
+    from src.api.main import get_cache, get_embedding_cache, get_router, get_usage_tracker
 
     model = req.model
     if req.experiment is not None:
         try:
-            model = tenant_ab_router(api_key).get_assignment(
-                req.experiment, req.user or "default"
-            )
+            model = tenant_ab_router(api_key).get_assignment(req.experiment, req.user or "default")
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e)) from e
 
@@ -86,24 +95,34 @@ async def create_completion(
     )
 
     cache = get_cache() if settings.cache_enabled else None
+    semantic = get_embedding_cache() if settings.semantic_cache_enabled is True else None
+    prepared = None
     started = time.perf_counter()
     try:
         provider = get_router().route(model)
 
         # Everything that can change the answer goes into the cache key.
         cache_request = {"provider": provider.name, **req.model_dump(mode="json"), "model": model}
+        if settings.cache_version != "1":
+            cache_request["cache_version"] = settings.cache_version
         if cache is not None:
             cached = cache.get(cache_request, tenant=api_key)
             if cached is not None:
                 metrics.inc("llm_gateway_cache_total", result="hit")
-                # Nothing was sent upstream, so nothing was billed for this call.
-                return {
-                    **cached,
-                    "x-gateway-cache": "hit",
-                    "x-gateway-cost-usd": 0.0,
-                    "x-gateway-latency-ms": round((time.perf_counter() - started) * 1000),
-                }
+                return cache_hit(cached, "hit", started)
             metrics.inc("llm_gateway_cache_total", result="miss")
+
+        if semantic is not None:
+            hit, prepared = await asyncio.to_thread(semantic.lookup, cache_request, tenant=api_key)
+            metrics.inc("llm_gateway_semantic_cache_total", result="hit" if hit else "miss")
+            if hit:
+                cached, similarity = hit
+                return cache_hit(
+                    cached,
+                    "semantic-hit",
+                    started,
+                    **{"x-gateway-cache-similarity": round(similarity, 4)},
+                )
 
         response = await provider.complete(chat_request)
     except ProviderTimeoutError as e:
@@ -134,7 +153,9 @@ async def create_completion(
 
     response_dict = response.model_dump(by_alias=True)
     response_dict["x-gateway-provider"] = provider.name
-    response_dict["x-gateway-cache"] = "miss" if cache is not None else "disabled"
+    response_dict["x-gateway-cache"] = (
+        "miss" if cache is not None or semantic is not None else "disabled"
+    )
     response_dict["x-gateway-cost-usd"] = cost_usd
     response_dict["x-gateway-latency-ms"] = round((time.perf_counter() - started) * 1000)
     if req.experiment is not None:
@@ -143,6 +164,9 @@ async def create_completion(
 
     if cache is not None:
         cache.set(cache_request, response_dict, tenant=api_key)
+
+    if semantic is not None:
+        background_tasks.add_task(semantic.write, prepared, response_dict)
 
     background_tasks.add_task(
         get_usage_tracker().record,
@@ -153,3 +177,19 @@ async def create_completion(
     )
 
     return response_dict
+
+
+@router.delete("/v1/cache")
+async def delete_cache(api_key: str = Depends(require_api_key)):
+    from src.api.main import get_cache, get_embedding_cache
+
+    caches = [
+        get_cache() if settings.cache_enabled else None,
+        get_embedding_cache() if settings.semantic_cache_enabled is True else None,
+    ]
+
+    async def clear(cache):
+        return await asyncio.to_thread(cache.clear, tenant=api_key) if cache is not None else 0
+
+    exact, semantic = await asyncio.gather(*(clear(cache) for cache in caches))
+    return {"exact": exact, "semantic": semantic}

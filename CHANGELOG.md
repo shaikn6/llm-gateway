@@ -5,6 +5,7 @@ All notable changes to this project are documented here.
 ## [Unreleased]
 
 ### Added
+- Opt-in guarded embedding cache behind exact Redis lookups, with local Chroma persistence, tenant-scoped invalidation, TTL/caps, startup validation, error metrics, and measured threshold/cost benchmarks.
 - `POST /v1/chat/completions` accepts `experiment` (and `user`, the bucketing
   key, default `"default"`): the experiment's assignment replaces `model`, and
   the response carries `x-gateway-experiment` / `x-gateway-variant`. Usage and
