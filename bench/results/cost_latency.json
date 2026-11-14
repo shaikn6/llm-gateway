@@ -1,0 +1,73 @@
+{
+  "note": "Hit rate depends on the workload. Pairs isolated by exact system scope; each sends text_a then text_b. No additional exact-repeat traffic.",
+  "pairs": 350,
+  "requests": 700,
+  "provider_latency_ms": 200.0,
+  "threshold": 0.9997357130050659,
+  "model": "gpt-4o-mini",
+  "prompt_tokens": 100,
+  "completion_tokens": 50,
+  "configs": {
+    "no_cache": {
+      "provider_calls": 700,
+      "exact_hits": 0,
+      "semantic_hits": 0,
+      "exact_hit_rate": 0.0,
+      "semantic_hit_rate": 0.0,
+      "false_semantic_hits": 0,
+      "dollars_saved": 0.0,
+      "provider_cost_usd": 0.0315,
+      "hits": {
+        "count": 0,
+        "p50_ms": null,
+        "p95_ms": null
+      },
+      "misses": {
+        "count": 700,
+        "p50_ms": 205.982417013729,
+        "p95_ms": 210.22104585863417
+      }
+    },
+    "exact_only": {
+      "provider_calls": 699,
+      "exact_hits": 1,
+      "semantic_hits": 0,
+      "exact_hit_rate": 0.0014285714285714286,
+      "semantic_hit_rate": 0.0,
+      "false_semantic_hits": 0,
+      "dollars_saved": 4.5e-05,
+      "provider_cost_usd": 0.031455000000000004,
+      "hits": {
+        "count": 1,
+        "p50_ms": 2.6430829893797636,
+        "p95_ms": 2.6430829893797636
+      },
+      "misses": {
+        "count": 699,
+        "p50_ms": 205.7174590008799,
+        "p95_ms": 211.23097561649047
+      }
+    },
+    "exact_semantic": {
+      "provider_calls": 699,
+      "exact_hits": 1,
+      "semantic_hits": 0,
+      "exact_hit_rate": 0.0014285714285714286,
+      "semantic_hit_rate": 0.0,
+      "false_semantic_hits": 0,
+      "dollars_saved": 4.5e-05,
+      "provider_cost_usd": 0.031455000000000004,
+      "hits": {
+        "count": 1,
+        "p50_ms": 2.3452499881386757,
+        "p95_ms": 2.3452499881386757
+      },
+      "misses": {
+        "count": 699,
+        "p50_ms": 297.9147500009276,
+        "p95_ms": 382.76395412103744
+      }
+    }
+  },
+  "incremental_semantic_savings_usd": 0.0
+}

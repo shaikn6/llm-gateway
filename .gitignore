@@ -67,3 +67,6 @@ Thumbs.db
 *.tfstate.*
 *.tfvars
 .terraform.lock.hcl
+
+.semantic_cache/
+bench/results/*_vectors.npz

@@ -2,17 +2,17 @@
 
 # llm-gateway
 
-> **One OpenAI-compatible endpoint for Anthropic, OpenAI and Ollama, with response caching, A/B routing and cost tracking.**
+> **One OpenAI-compatible endpoint for Anthropic, OpenAI and Ollama, with exact caching, an opt-in semantic tier, A/B routing and cost tracking.**
 
 [![CI](https://github.com/shaikn6/llm-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/shaikn6/llm-gateway/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
 
-**One OpenAI-compatible chat endpoint in front of Anthropic, OpenAI and local Ollama models, with exact-match response caching, sliding-window rate limiting, deterministic A/B routing and per-key cost tracking, backed by Redis.**
+**One OpenAI-compatible chat endpoint in front of Anthropic, OpenAI and local Ollama models, with exact-match response caching, an opt-in guarded semantic tier, sliding-window rate limiting, deterministic A/B routing and per-key cost tracking, backed by Redis.**
 
 Instead of calling provider SDKs directly, send OpenAI-shaped chat-completion requests to the gateway and get vendor abstraction, response caching, rate limiting, traffic-split experiments, and token/cost accounting in one place. It is deliberately a subset of the OpenAI API: non-streaming chat completions only, authenticated with an `X-API-Key` header (an OpenAI SDK client needs that header added; `Authorization: Bearer` is not read).
 
-The [Quickstart](#quickstart) runs the whole path offline against a fake upstream (no provider keys, no cost) and shows a cache hit, a cache miss, a `422` and a `401` in six requests. The suite has 428 tests at 99% line coverage, including contract tests that bind each provider's request against the real installed `anthropic` / `openai` SDK signatures.
+The [Quickstart](#quickstart) runs the whole path offline against a fake upstream (no provider keys, no cost) and shows a cache hit, a cache miss, a `422` and a `401` in six requests. The suite has 466 tests at 99% line coverage, including contract tests that bind each provider's request against the real installed `anthropic` / `openai` SDK signatures.
 
 ## Why this exists
 
@@ -101,7 +101,7 @@ Stop the three background processes with `kill %1 %2 %3`.
 To use the real providers, set real `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` values and leave `ANTHROPIC_BASE_URL` unset. Nothing in this repository's tests or CI calls a live provider API, so that path is exercised only through the real SDK request code against a fake transport.
 
 ```bash
-.venv/bin/pytest --cov=src --cov-report=term-missing --cov-fail-under=95   # 428 passed, 99% line coverage
+.venv/bin/pytest --cov=src --cov-report=term-missing --cov-fail-under=95   # 466 passed, 99% line coverage
 .venv/bin/ruff check src/ tests/                                           # lint (CI-gated; mypy is unpinned/advisory, not CI-gated)
 ```
 
@@ -133,7 +133,7 @@ The gateway is deliberately small and composable. Each concern is an isolated mo
 
 - **Deterministic A/B testing (`src/gateway/ab_router.py`).** Assignment is `MD5(experiment_id + user_id) % 100`, walked against cumulative `traffic_pct` buckets. Because it's a pure hash of stable inputs, the same user always lands in the same variant across requests and restarts — no assignment state to store or sync. The experiment *definitions* are a different matter: they live in process memory only, so they are lost on restart and are not shared between workers or replicas. Variant `traffic_pct` values must be integers in 0–100 that sum to exactly 100; anything else is a `422`.
 
-- **Response caching (`src/cache/semantic_cache.py`).** An exact-match cache, not a semantic one — the `SemanticCache` class name is historical and there are no embeddings or similarity search. The key is a `SHA-256` over the canonicalized (`sort_keys`) request — provider, model, messages, `max_tokens`, `temperature`, `top_p`, `stop` — prefixed with a fingerprint of the caller's API key, stored in Redis with a configurable TTL. A hit therefore needs the same caller sending a byte-identical request; a different model, parameter, or API key is a miss, and one caller can never be served another's cached answer.
+- **Response caching (`src/cache/semantic_cache.py`).** An exact-match cache, not a semantic one — the `SemanticCache` class name is historical and this first tier uses no embeddings or similarity search. The optional second tier is described below. The key is a `SHA-256` over the canonicalized (`sort_keys`) request — provider, model, messages, `max_tokens`, `temperature`, `top_p`, `stop` — prefixed with a fingerprint of the caller's API key, stored in Redis with a configurable TTL. A hit therefore needs the same caller sending a byte-identical request; a different model, parameter, or API key is a miss, and one caller can never be served another's cached answer.
 
 - **Rate limiting (`src/middleware/rate_limiter.py`).** A true sliding window built on Redis sorted sets: each request is a `ZADD` with a timestamp score, expired entries are trimmed with `ZREMRANGEBYSCORE`, and the live `ZCARD` is compared to the limit. Trim, count and record run as one Lua script, so concurrent requests cannot oversubscribe the window, and a denied request records nothing.
 
@@ -154,7 +154,7 @@ The gateway is deliberately small and composable. Each concern is an isolated mo
 
 ## Testing
 
-`pytest` collects **428 tests** (393 test functions, some parametrized) across 20 files in `tests/`. Line coverage on `src/` is 99% (`pytest --cov=src --cov-report=term-missing`; CI fails under 95%). Redis is mocked throughout, and no test opens a network connection.
+`pytest` collects **466 tests** (including parametrized cases) in `tests/`. Line coverage on `src/` is 99% (`pytest --cov=src --cov-report=term-missing`; CI fails under 95%). Redis uses mocks or fakeredis. Optional integration tests use local Chroma and the cached default embedder; no upstream provider is called.
 
 Beyond the provider adapters, the A/B bucketing math, the sliding-window limiter, usage/cost aggregation and the audit log, the suite pins down the behaviours that are easy to get wrong:
 
@@ -162,6 +162,22 @@ Beyond the provider adapters, the A/B bucketing math, the sliding-window limiter
 - **Cache isolation** (`tests/test_cache_isolation.py`) — identical request is a hit; a different model, provider, parameter, message, or API key is a miss.
 - **Validation, error mapping, Redis outage, experiment weights** (`tests/test_api_hardening.py`) — `422` for empty or malformed messages and for unsupported fields, `502` / `504` with no upstream text in the body, `503` + `Retry-After` when the limiter's Redis is down, cache and usage failures not failing the request.
 - **Startup guard** (`tests/test_config.py`) — no keys and no dev flag means `Settings()` raises.
+
+## Semantic cache
+
+An opt-in embedding tier sits behind exact Redis lookups, with tenant/request isolation, number and contrast guards, TTL and per-tenant caps. Enable it with the `semantic` extra and `SEMANTIC_CACHE_ENABLED=true`. The tuned threshold is conservative, but held-out precision still falls below the dev target; read the measured limitations before enabling it. See [setup, storage policy, benchmarks and cost](docs/SEMANTIC_CACHE.md).
+
+`DELETE /v1/cache` clears the caller's entries in both tiers using the same `X-API-Key` authentication and rate limit as completions. Semantic hits expose `x-gateway-cache: semantic-hit` and a four-decimal `x-gateway-cache-similarity` as JSON body fields. `llm_gateway_cache_total` counts exact `hit`/`miss`; `llm_gateway_semantic_cache_total` counts semantic `hit`/`miss`; runtime semantic failures increment `llm_gateway_semantic_cache_errors_total`.
+
+Measured replay: 700 requests, 200 ms in-process upstream latency. **Hit rate depends on this workload.** See [raw results](bench/results/cost_latency.json) and [benchmark limitations](docs/SEMANTIC_CACHE.md).
+
+| Configuration | Provider calls | Exact hits | Semantic hits | Dollars saved | Hit p50 / p95 ms | Miss p50 / p95 ms |
+|---|---:|---:|---:|---:|---:|---:|
+| no_cache | 700 | 0 | 0 | $0.000000 | n/a | 205.98 / 210.22 |
+| exact_only | 699 | 1 | 0 | $0.000045 | 2.64 / 2.64 | 205.72 / 211.23 |
+| exact_semantic | 699 | 1 | 0 | $0.000045 | 2.35 / 2.35 | 297.91 / 382.76 |
+
+Incremental semantic savings: **$0.000000**. The replay observes no semantic hits at the shared threshold.
 
 ## Deployment
 
@@ -175,6 +191,7 @@ Interactive docs: `http://localhost:8000/docs` (Swagger UI) · `http://localhost
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
 | `GET` | `/health` | — | Health check — returns service version |
+| `DELETE` | `/v1/cache` | `X-API-Key` | Delete only the caller's cache entries; returns `exact` and `semantic` counts |
 | `GET` | `/metrics` | — | Prometheus metrics (text format): requests by route and status, a request-latency histogram, cache hit/miss, rate-limited (`429`) and unavailable (`503`) counts, and per-model tokens and USD cost |
 | `POST` | `/v1/chat/completions` | `X-API-Key` | Chat completions in the OpenAI request/response shape (routes to Anthropic, OpenAI, or Ollama). Non-streaming only. |
 | `GET` | `/v1/usage` | `X-API-Key` | Token and USD cost totals recorded for the calling key (last 24 h), broken down by model |
@@ -182,7 +199,7 @@ Interactive docs: `http://localhost:8000/docs` (Swagger UI) · `http://localhost
 | `POST` | `/v1/experiments` | `X-API-Key` | Create a new A/B experiment (in-memory; `traffic_pct` must sum to 100) |
 | `GET` | `/v1/experiments/{experiment_id}/assignment` | `X-API-Key` | Get model assignment for a user |
 
-`/v1/chat/completions` accepts `model`, `messages` (at least one), `max_tokens` (default 1024), `temperature`, `top_p`, `stop`, and `stream: false`. Optionally `experiment` (an experiment id) with `user` (the bucketing key, default `"default"`): the experiment's assignment, the same one `/v1/experiments/{id}/assignment` returns, replaces `model`, an unknown id is a `404`, and the response body gains `x-gateway-experiment` and `x-gateway-variant` fields (they are JSON fields, not HTTP headers). Every `200` body also carries `x-gateway-provider`, `x-gateway-cache` (`miss`, `hit` or `disabled`), `x-gateway-cost-usd` (`0.0` on a cache hit, `null` for a model with no listed price) and `x-gateway-latency-ms` (gateway time for this call). Every other field — including `stream: true`, `tools`, `tool_choice`, `response_format`, `n` — is rejected with a `422` that names it. Status codes: `200`, `401` (bad or missing key), `422` (invalid request), `429` (over quota), `502` (upstream error), `503` (rate limiter unavailable), `504` (upstream timeout).
+`/v1/chat/completions` accepts `model`, `messages` (at least one), `max_tokens` (default 1024), `temperature`, `top_p`, `stop`, and `stream: false`. Optionally `experiment` (an experiment id) with `user` (the bucketing key, default `"default"`): the experiment's assignment, the same one `/v1/experiments/{id}/assignment` returns, replaces `model`, an unknown id is a `404`, and the response body gains `x-gateway-experiment` and `x-gateway-variant` fields (they are JSON fields, not HTTP headers). Every `200` body also carries `x-gateway-provider`, `x-gateway-cache` (`miss`, `hit`, `semantic-hit` or `disabled`), `x-gateway-cost-usd` (`0.0` on a cache hit, `null` for a model with no listed price) and `x-gateway-latency-ms` (gateway time for this call). Every other field — including `stream: true`, `tools`, `tool_choice`, `response_format`, `n` — is rejected with a `422` that names it. Status codes: `200`, `401` (bad or missing key), `422` (invalid request), `429` (over quota), `502` (upstream error), `503` (rate limiter unavailable), `504` (upstream timeout).
 
 Auth is enforced on every protected route — a request with a missing or unrecognized `X-API-Key` is rejected before it reaches the router, cache, or rate limiter:
 

@@ -1,0 +1,211 @@
+{
+  "seed": 0,
+  "split": "stratified 50/50 dev/test",
+  "target_precision": 0.98,
+  "datasets": {
+    "fintech_pairs": {
+      "pairs": 50,
+      "blocked": 17,
+      "dev_pairs": 25,
+      "test_pairs": 25,
+      "selection": {
+        "without_guards": {
+          "threshold": 0.925,
+          "target_reached": false,
+          "dev": {
+            "precision": 0.6666666666666666,
+            "recall": 0.3076923076923077,
+            "false_positive_rate": 0.16666666666666666,
+            "true_positives": 4,
+            "false_positives": 2,
+            "predicted_positive": 6,
+            "positives": 13,
+            "negatives": 12
+          },
+          "test": {
+            "precision": 0.5,
+            "recall": 0.4166666666666667,
+            "false_positive_rate": 0.38461538461538464,
+            "true_positives": 5,
+            "false_positives": 5,
+            "predicted_positive": 10,
+            "positives": 12,
+            "negatives": 13
+          }
+        },
+        "with_guards": {
+          "threshold": 0.878,
+          "target_reached": true,
+          "dev": {
+            "precision": 1.0,
+            "recall": 0.38461538461538464,
+            "false_positive_rate": 0.0,
+            "true_positives": 5,
+            "false_positives": 0,
+            "predicted_positive": 5,
+            "positives": 13,
+            "negatives": 12
+          },
+          "test": {
+            "precision": 0.75,
+            "recall": 0.5,
+            "false_positive_rate": 0.15384615384615385,
+            "true_positives": 6,
+            "false_positives": 2,
+            "predicted_positive": 8,
+            "positives": 12,
+            "negatives": 13
+          }
+        }
+      },
+      "test": {
+        "without_guards": {
+          "precision": 0.46153846153846156,
+          "recall": 0.5,
+          "false_positive_rate": 0.5384615384615384,
+          "true_positives": 6,
+          "false_positives": 7,
+          "predicted_positive": 13,
+          "positives": 12,
+          "negatives": 13
+        },
+        "with_guards": {
+          "precision": 0.75,
+          "recall": 0.5,
+          "false_positive_rate": 0.15384615384615385,
+          "true_positives": 6,
+          "false_positives": 2,
+          "predicted_positive": 8,
+          "positives": 12,
+          "negatives": 13
+        }
+      },
+      "runtime_test": {
+        "with_guards": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "false_positive_rate": 0.0,
+          "true_positives": 0,
+          "false_positives": 0,
+          "predicted_positive": 0,
+          "positives": 12,
+          "negatives": 13
+        },
+        "without_guards": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "false_positive_rate": 0.0,
+          "true_positives": 0,
+          "false_positives": 0,
+          "predicted_positive": 0,
+          "positives": 12,
+          "negatives": 13
+        }
+      }
+    },
+    "paws_sample": {
+      "pairs": 2000,
+      "blocked": 28,
+      "dev_pairs": 1000,
+      "test_pairs": 1000,
+      "selection": {
+        "without_guards": {
+          "threshold": 0.9997357130050659,
+          "target_reached": true,
+          "dev": {
+            "precision": 1.0,
+            "recall": 0.006564551422319475,
+            "false_positive_rate": 0.0,
+            "true_positives": 3,
+            "false_positives": 0,
+            "predicted_positive": 3,
+            "positives": 457,
+            "negatives": 543
+          },
+          "test": {
+            "precision": 0.6666666666666666,
+            "recall": 0.008771929824561403,
+            "false_positive_rate": 0.003676470588235294,
+            "true_positives": 4,
+            "false_positives": 2,
+            "predicted_positive": 6,
+            "positives": 456,
+            "negatives": 544
+          }
+        },
+        "with_guards": {
+          "threshold": 0.9997357130050659,
+          "target_reached": true,
+          "dev": {
+            "precision": 1.0,
+            "recall": 0.006564551422319475,
+            "false_positive_rate": 0.0,
+            "true_positives": 3,
+            "false_positives": 0,
+            "predicted_positive": 3,
+            "positives": 457,
+            "negatives": 543
+          },
+          "test": {
+            "precision": 0.6666666666666666,
+            "recall": 0.008771929824561403,
+            "false_positive_rate": 0.003676470588235294,
+            "true_positives": 4,
+            "false_positives": 2,
+            "predicted_positive": 6,
+            "positives": 456,
+            "negatives": 544
+          }
+        }
+      },
+      "test": {
+        "without_guards": {
+          "precision": 0.6666666666666666,
+          "recall": 0.008771929824561403,
+          "false_positive_rate": 0.003676470588235294,
+          "true_positives": 4,
+          "false_positives": 2,
+          "predicted_positive": 6,
+          "positives": 456,
+          "negatives": 544
+        },
+        "with_guards": {
+          "precision": 0.6666666666666666,
+          "recall": 0.008771929824561403,
+          "false_positive_rate": 0.003676470588235294,
+          "true_positives": 4,
+          "false_positives": 2,
+          "predicted_positive": 6,
+          "positives": 456,
+          "negatives": 544
+        }
+      },
+      "runtime_test": {
+        "with_guards": {
+          "precision": 0.6666666666666666,
+          "recall": 0.008771929824561403,
+          "false_positive_rate": 0.003676470588235294,
+          "true_positives": 4,
+          "false_positives": 2,
+          "predicted_positive": 6,
+          "positives": 456,
+          "negatives": 544
+        },
+        "without_guards": {
+          "precision": 0.6666666666666666,
+          "recall": 0.008771929824561403,
+          "false_positive_rate": 0.003676470588235294,
+          "true_positives": 4,
+          "false_positives": 2,
+          "predicted_positive": 6,
+          "positives": 456,
+          "negatives": 544
+        }
+      }
+    }
+  },
+  "threshold_candidates": "0.001 grid plus every observed dev similarity; lowest qualifying candidate",
+  "undefined_precision": "Reported as 0 when no positives are predicted",
+  "threshold": 0.9997357130050659,
+  "threshold_policy": "Maximum of per-dataset guarded dev thresholds. test uses each dataset guarded threshold; runtime_test uses the shared threshold."
+}

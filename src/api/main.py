@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import asynccontextmanager
 from functools import lru_cache
 
 from fastapi import FastAPI
@@ -21,12 +23,22 @@ from src.middleware.usage_tracker import UsageTracker
 
 configure_logging()
 
-app = FastAPI(title="LLM Gateway", version=__version__)
+
+@asynccontextmanager
+async def lifespan(app):
+    if settings.semantic_cache_enabled:
+        cache = await asyncio.to_thread(get_embedding_cache)
+        await asyncio.to_thread(cache.warm)
+    yield
+
+
+app = FastAPI(title="LLM Gateway", version=__version__, lifespan=lifespan)
 app.add_middleware(AuditMiddleware)
 app.add_middleware(MaxBodySizeMiddleware, max_bytes=settings.max_body_bytes)
 app.include_router(completions_router)
 app.include_router(experiments_router)
 app.include_router(usage_router)
+
 
 @lru_cache(maxsize=1)
 def get_router() -> GatewayRouter:
@@ -59,3 +71,25 @@ def prometheus_metrics():
     # Unauthenticated and outside the rate limiter, like /health, so a scraper
     # can poll it without a key and without consuming anyone's quota.
     return PlainTextResponse(metrics.render(), media_type="text/plain; version=0.0.4")
+
+
+@lru_cache(maxsize=1)
+def get_embedding_cache():
+    try:
+        from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
+
+        from src.cache.embedding_cache import ChromaStore, EmbeddingCache
+
+        embedder = DefaultEmbeddingFunction()
+        return EmbeddingCache(
+            embedder,
+            ChromaStore(settings.semantic_cache_path),
+            settings.semantic_cache_threshold,
+            settings.cache_ttl_s,
+            settings.semantic_cache_max_entries_per_tenant,
+        )
+    except ImportError as exc:
+        raise RuntimeError(
+            "Semantic cache startup failed: install .[semantic] and ensure the default "
+            "Chroma embedder is available locally."
+        ) from exc

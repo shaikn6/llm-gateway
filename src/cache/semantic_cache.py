@@ -15,6 +15,10 @@ import redis
 logger = logging.getLogger(__name__)
 
 
+def digest(value) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
+
+
 class SemanticCache:
     def __init__(
         self, redis_url: str = "redis://localhost:6379/0", ttl_s: int = 3600, timeout_s: float = 2.0
@@ -34,9 +38,11 @@ class SemanticCache:
         model, messages, sampling parameters). ``tenant`` is the caller's API
         key; only a fingerprint of it is written to Redis.
         """
-        scope = hashlib.sha256(tenant.encode()).hexdigest()[:16]
-        payload = json.dumps(request, sort_keys=True)
-        return f"llm_cache:{scope}:{hashlib.sha256(payload.encode()).hexdigest()}"
+        return f"llm_cache:{self._scope(tenant)}:{digest(request)}"
+
+    @staticmethod
+    def _scope(tenant: str) -> str:
+        return hashlib.sha256(tenant.encode()).hexdigest()[:16]
 
     def get(self, request: dict | list, *, tenant: str) -> dict | None:
         try:
@@ -52,3 +58,20 @@ class SemanticCache:
             self._redis.setex(self._key(request, tenant=tenant), self._ttl, json.dumps(response))
         except redis.RedisError as exc:
             logger.warning("cache write failed (%s); response not cached", type(exc).__name__)
+
+    def clear(self, *, tenant: str) -> int:
+        """Invalidate only this caller's entries, using incremental Redis SCAN."""
+        deleted = 0
+        try:
+            cursor = 0
+            while True:
+                cursor, batch = self._redis.scan(
+                    cursor=cursor, match=f"llm_cache:{self._scope(tenant)}:*", count=100
+                )
+                if batch:
+                    deleted += self._redis.unlink(*batch)
+                if not cursor:
+                    break
+        except redis.RedisError as exc:
+            logger.warning("cache invalidation failed (%s)", type(exc).__name__)
+        return deleted
