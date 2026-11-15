@@ -61,3 +61,40 @@ def test_max_tokens_above_ceiling_rejected():
 def test_max_tokens_at_ceiling_accepted():
     req = CompletionRequest(max_tokens=MAX_OUTPUT_TOKENS, messages=MESSAGES)
     assert req.max_tokens == MAX_OUTPUT_TOKENS
+
+
+async def _run_with_content_length(cl_value: bytes, body: bytes):
+    # Drive the ASGI middleware directly: httpx recomputes Content-Length, so a
+    # malformed header value can only be injected at the scope level.
+    sent = []
+
+    async def inner(scope, receive, send):
+        await receive()
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    mw = MaxBodySizeMiddleware(inner, max_bytes=100)
+    scope = {"type": "http", "headers": [(b"content-length", cl_value)]}
+
+    async def receive():
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    async def send(message):
+        sent.append(message)
+
+    await mw(scope, receive, send)
+    return sent
+
+
+async def test_non_integer_content_length_small_body_passes():
+    # A malformed Content-Length must not crash the cap: it is ignored and the
+    # request proceeds, enforced on the actual streamed bytes instead.
+    sent = await _run_with_content_length(b"not-a-number", b"x" * 10)
+    assert sent[0]["status"] == 200
+
+
+async def test_non_integer_content_length_oversize_still_rejected():
+    # Ignoring the bad header must not disable the cap: an oversize streamed
+    # body is still rejected with 413.
+    sent = await _run_with_content_length(b"not-a-number", b"x" * 500)
+    assert sent[0]["status"] == 413

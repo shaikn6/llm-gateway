@@ -10,9 +10,9 @@
 
 **One OpenAI-compatible chat endpoint in front of Anthropic, OpenAI and local Ollama models, with exact-match response caching, an opt-in guarded semantic tier, sliding-window rate limiting, deterministic A/B routing and per-key cost tracking, backed by Redis.**
 
-Instead of calling provider SDKs directly, send OpenAI-shaped chat-completion requests to the gateway and get vendor abstraction, response caching, rate limiting, traffic-split experiments, and token/cost accounting in one place. It is deliberately a subset of the OpenAI API: non-streaming chat completions only, authenticated with an `X-API-Key` header (an OpenAI SDK client needs that header added; `Authorization: Bearer` is not read).
+Instead of calling provider SDKs directly, send OpenAI-shaped chat-completion requests to the gateway and get vendor abstraction, response caching, rate limiting, traffic-split experiments, and token/cost accounting in one place. It is deliberately a subset of the OpenAI API: non-streaming chat completions only, authenticated with an `X-API-Key` header (an OpenAI SDK client needs that header added; `Authorization: Bearer` is not read). This is a general-purpose, provider-agnostic chat proxy; the related [finarena](https://github.com/shaikn6/finarena) repository is a separate, domain-specific fintech serving API (sentiment, credit-score explanations, signed answers) rather than a gateway.
 
-The [Quickstart](#quickstart) runs the whole path offline against a fake upstream (no provider keys, no cost) and shows a cache hit, a cache miss, a `422` and a `401` in six requests. The suite has 466 tests at 99% line coverage, including contract tests that bind each provider's request against the real installed `anthropic` / `openai` SDK signatures.
+The [Quickstart](#quickstart) runs the whole path offline against a fake upstream (no provider keys, no cost) and shows a cache hit, a cache miss, a `422` and a `401` in six requests. The suite has 476 tests at 100% line coverage (measured with the `semantic` extra, as CI runs it), including contract tests that bind each provider's request against the real installed `anthropic` / `openai` SDK signatures.
 
 ## Why this exists
 
@@ -101,7 +101,8 @@ Stop the three background processes with `kill %1 %2 %3`.
 To use the real providers, set real `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` values and leave `ANTHROPIC_BASE_URL` unset. Nothing in this repository's tests or CI calls a live provider API, so that path is exercised only through the real SDK request code against a fake transport.
 
 ```bash
-.venv/bin/pytest --cov=src --cov-report=term-missing --cov-fail-under=95   # 466 passed, 99% line coverage
+.venv/bin/pip install -e ".[dev,semantic]"                                 # the full suite needs the semantic extra (as CI does)
+.venv/bin/pytest --cov=src --cov-report=term-missing --cov-fail-under=95   # 476 passed, 100% line coverage
 .venv/bin/ruff check src/ tests/                                           # lint (CI-gated; mypy is unpinned/advisory, not CI-gated)
 ```
 
@@ -154,7 +155,7 @@ The gateway is deliberately small and composable. Each concern is an isolated mo
 
 ## Testing
 
-`pytest` collects **466 tests** (including parametrized cases) in `tests/`. Line coverage on `src/` is 99% (`pytest --cov=src --cov-report=term-missing`; CI fails under 95%). Redis uses mocks or fakeredis. Optional integration tests use local Chroma and the cached default embedder; no upstream provider is called.
+`pytest` collects **476 tests** (including parametrized cases) in `tests/`. Line coverage on `src/` is 100% with the `semantic` extra installed, as CI runs it (`pytest --cov=src --cov-report=term-missing`; CI fails under 95%). Redis uses mocks or fakeredis. Optional integration tests use local Chroma and the cached default embedder; no upstream provider is called.
 
 Beyond the provider adapters, the A/B bucketing math, the sliding-window limiter, usage/cost aggregation and the audit log, the suite pins down the behaviours that are easy to get wrong:
 
