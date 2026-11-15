@@ -52,7 +52,7 @@ All Redis-backed components (cache, rate limiter, usage tracker) share one Redis
 | Response cache | **Degrades to a miss**; writes are skipped | The cache is an optimisation, not a dependency. |
 | Usage tracker | The record is dropped with a warning | It runs after the response is sent and must not fail a served completion. |
 
-Because all three share one Redis, a full outage is seen by callers as the limiter's `503`; the cache and usage paths matter when only those calls fail. `/health` and the `401` for a bad key do not touch Redis. The Redis clients use redis-py's default socket timeouts, so an unreachable-but-not-refusing Redis (a black-holed network path) is not bounded by the gateway yet.
+Because all three share one Redis, a full outage is seen by callers as the limiter's `503`; the cache and usage paths matter when only those calls fail. `/health` and the `401` for a bad key do not touch Redis. Each Redis client is created with an explicit socket timeout (`redis_timeout_s`, default 2 s, applied to both `socket_connect_timeout` and `socket_timeout`), so an unreachable-but-not-refusing Redis (a black-holed network path) fails fast rather than hanging the request (`tests/test_redis_timeout.py`).
 
 ## Quickstart
 
@@ -293,7 +293,7 @@ Python 3.11 · FastAPI · Pydantic v2 · Redis (cache / rate limiter / usage) ·
 - Per-key spend caps enforced at request time, not only measured after the fact.
 - Pass a provider's `429` and its `Retry-After` through to the caller instead of a generic `502`.
 - Streaming and tool-call support, so OpenAI SDK clients can use the gateway without changing request shape.
-- Persist A/B experiment definitions (today they live in process memory and are lost on restart) and bound Redis socket timeouts so a black-holed Redis cannot stall requests.
+- Persist A/B experiment definitions (today they live in process memory and are lost on restart) and share them across workers and replicas.
 - Short-lived, scoped API keys with rotation instead of a static environment allowlist.
 
 ## License

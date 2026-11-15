@@ -110,7 +110,8 @@ class TestABRouterGetAssignment:
     def test_traffic_below_100_falls_back_to_last_variant(self, router):
         """A degenerate experiment whose traffic_pct sums below 100 (no bucket
         ever falls inside a cumulative range) still assigns every user the last
-        variant instead of raising IndexError."""
+        variant via the post-loop fallback, rather than falling through the
+        loop and returning None."""
         exp = Experiment(
             id="under",
             variants=[
@@ -119,9 +120,7 @@ class TestABRouterGetAssignment:
             ],
         )
         router.add_experiment(exp)
-        assert all(
-            router.get_assignment("under", f"u{i}") == "last" for i in range(100)
-        )
+        assert all(router.get_assignment("under", f"u{i}") == "last" for i in range(100))
 
     def test_bucket_is_0_to_99(self, router, two_variant_exp):
         """Verify bucket computation is md5 mod 100 (0-99 range)."""
