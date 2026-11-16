@@ -74,7 +74,7 @@ A local Chroma `PersistentClient` gives each replica its own semantic cache unde
 
 Savings are avoided provider calls **on top of the exact tier**. Local embedding and storage have compute and disk costs; every exact miss incurs embedding overhead when the semantic tier is enabled, including provider misses. A vector is computed once and reused on the subsequent write. Exact hits avoid that overhead.
 
-The [threshold results](../bench/results/threshold.json) use 50 fintech pairs (25 dev / 25 test) and 2,000 PAWS pairs (1,000 / 1,000). Guards block 17 fintech pairs and 28 PAWS pairs before similarity. At each dataset's guarded dev threshold, held-out results are:
+The [threshold results](../bench/results/threshold.json) use 50 fintech pairs (25 dev / 25 test) and 2,000 PAWS pairs (1,000 / 1,000). Both inputs are committed under [bench/data](../bench/data/): `fintech_pairs.csv` holds 50 hand-labelled banking-question paraphrase and near-miss pairs made for this benchmark (columns `text_a`, `text_b`, `same_meaning`), not a public dataset; `paws_sample.csv` holds 2,000 labelled pairs from PAWS (Zhang, Baldridge and He, 2019), and which PAWS split and sampling produced it was not recorded. Twenty-five held-out fintech pairs is a very small test set, so the fintech figures carry wide uncertainty. Guards block 17 fintech pairs and 28 PAWS pairs before similarity. At each dataset's guarded dev threshold, held-out results are:
 
 | Dataset | Threshold | Guards | Precision | Recall | False-positive rate |
 |---|---:|---|---:|---:|---:|
