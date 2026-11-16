@@ -228,11 +228,11 @@ deliberately delegates, and what is not yet covered.
 | `/v1/chat/completions` and `/v1/experiments/*` | Unauthenticated use → provider-cost abuse | `X-API-Key` checked against the `API_KEYS` allowlist in `require_api_key` (`src/api/deps.py`); missing/unknown → `401` *before* the router, cache, or rate limiter is touched. No built-in default key: the process refuses to start with `API_KEYS` empty unless `GATEWAY_DEV_MODE=true` |
 | Cached completions | One caller reading another's cached answer | Cache key is scoped by a fingerprint of the caller's API key and covers provider, model and every forwarded parameter (`tests/test_cache_isolation.py`) |
 | Upstream error text | Provider error bodies leaking to callers | Provider failures surface as a fixed `502` / `504` message; exception text is never put in a response |
-| The gateway as a whole | Volumetric abuse / DoS from one caller | Redis sliding-window rate limiter (`src/middleware/rate_limiter.py`), keyed per API key, single pipelined round trip; over quota → `429`; Redis unreachable → fails closed with `503` |
+| The gateway as a whole | Volumetric abuse / DoS from one caller | Redis sliding-window rate limiter (`src/middleware/rate_limiter.py`), keyed per API key, one atomic Lua script per request; over quota → `429`; Redis unreachable → fails closed with `503` |
 | Prompt / completion content | Exposure through operational logging | `AuditMiddleware` records request metadata only — prompt and completion bodies are never written, at any log level (`tests/test_audit.py` asserts a known secret in a request body never appears in any emitted record) |
 | Cost attribution | One caller's spend attributed to another | Usage tracked per API key (`src/middleware/usage_tracker.py`); audit log ties each request to a key fingerprint |
 | Container runtime | Privilege escalation from a compromised process | Dockerfile runs as a non-root user with no build toolchain in the runtime layer |
-| Dependencies | Known-vuln transitive packages; breaking SDK releases | Exact-pinned `ruff`, `anthropic` / `openai` capped below the next major, SDK contract tests, CI lint gate, Dependabot on the repo |
+| Dependencies | Known-vuln transitive packages; breaking SDK releases | Exact-pinned `ruff`, `anthropic` (`<3`) / `openai` (`<4`) capped below an untested major, SDK contract tests, CI lint gate, Dependabot on the repo |
 
 ### Encryption
 
